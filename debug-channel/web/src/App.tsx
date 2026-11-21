@@ -161,7 +161,6 @@ export function App() {
   const detailVersion = useRef(0);
   const [detailError, setDetailError] = useState('');
   const epoch = useRef(0);
-  const olderRequest = useRef(false);
   const requestBusy = useRef(false);
   const cursor = useRef<string | null>(null);
   const before = useRef<string | null>(null);
@@ -241,7 +240,7 @@ export function App() {
     const media = window.matchMedia('(max-width: 1150px)');
     const update = () => {
       setNarrow(media.matches);
-      setDrawer((current) => (current === 'detail' ? null : current));
+      setDrawer(null);
     };
     media.addEventListener('change', update);
     return () => media.removeEventListener('change', update);
@@ -265,9 +264,7 @@ export function App() {
   useEffect(() => {
     const generation = ++epoch.current;
     const controller = new AbortController();
-    let busy = false;
     let ready = false;
-    olderRequest.current = false;
     requestBusy.current = false;
     setOlderBusy(false);
     cursor.current = null;
@@ -281,8 +278,7 @@ export function App() {
     setLoading(true);
     setError('');
     async function load() {
-      if (busy || requestBusy.current) return;
-      busy = true;
+      if (requestBusy.current) return;
       requestBusy.current = true;
       const search = new URLSearchParams(params);
       search.set('limit', '200');
@@ -321,7 +317,6 @@ export function App() {
         if (!controller.signal.aborted && generation === epoch.current)
           setError(reason instanceof Error ? reason.message : String(reason));
       } finally {
-        busy = false;
         if (generation === epoch.current) {
           requestBusy.current = false;
           setLoading(false);
@@ -362,9 +357,8 @@ export function App() {
 
   async function loadOlder() {
     const first = before.current;
-    if (!first || olderRequest.current || requestBusy.current) return;
+    if (!first || requestBusy.current) return;
     const generation = epoch.current;
-    olderRequest.current = true;
     requestBusy.current = true;
     setOlderBusy(true);
     const search = new URLSearchParams(params);
@@ -381,7 +375,6 @@ export function App() {
         setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       if (generation === epoch.current) {
-        olderRequest.current = false;
         requestBusy.current = false;
         setOlderBusy(false);
       }

@@ -330,6 +330,14 @@ export function App() {
           }
         }
         if (after === null) {
+          const selection = selectedRef.current;
+          if (selection?.managed_gap) {
+            detailVersion.current++;
+            setSelected(
+              page.events.find((row) => row.id === selection.id) ?? null,
+            );
+            setDetailError('');
+          }
           before.current = page.events[0]?.id ?? page.oldest_id;
           rows.current = [];
           setTrimmed(false);

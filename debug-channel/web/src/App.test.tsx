@@ -255,6 +255,11 @@ test('browses contiguous history while following a revision of an older row', as
 
 test('returns to a contiguous live tail after filling the history window', async () => {
   vi.useFakeTimers();
+  const gap = { ...first, id: '5001', managed_gap: true };
+  let finishDetail!: (reply: Response) => void;
+  const pendingDetail = new Promise<Response>((resolve) => {
+    finishDetail = resolve;
+  });
   const rows = (start: number, count: number) =>
     Array.from({ length: count }, (_, i) => ({
       ...first,
@@ -262,13 +267,15 @@ test('returns to a contiguous live tail after filling the history window', async
     }));
   let latest = 400;
   vi.stubGlobal('fetch', async (input: string) => {
-    const p = new URL(input, 'http://localhost').searchParams;
+    const url = new URL(input, 'http://localhost');
+    if (url.pathname === '/api/events/5001') return pendingDetail;
+    const p = url.searchParams;
     const after = Number(p.get('after'));
     const events = after
       ? rows(after + 1, Math.min(200, latest - after))
       : rows(Number(p.get('before') ?? latest + 1) - 200, 200);
     return response({
-      events,
+      events: events.map((row) => (row.id === gap.id ? gap : row)),
       oldest_id: '1',
       latest_id: String(latest),
       next_id: events.at(-1)?.id ?? String(latest),
@@ -285,6 +292,11 @@ test('returns to a contiguous live tail after filling the history window', async
     await vi.advanceTimersByTimeAsync(24000);
   });
   await act(async () => {
+    const row = history.querySelector('[aria-label="查看事件 5001"]');
+    if (!row) throw new Error('Expected gap 5001 in the live tail');
+    fireEvent.click(row);
+  });
+  await act(async () => {
     fireEvent.click(older);
   });
   expect(history.lastElementChild).toHaveAttribute(
@@ -292,14 +304,20 @@ test('returns to a contiguous live tail after filling the history window', async
     '查看事件 5000',
   );
   expect(follow).not.toBeChecked();
+  expect(within(screen.getByRole('tabpanel')).getByText(gap.id)).toBeVisible();
   latest = 5201;
   await act(async () => {
     fireEvent.click(follow);
     await vi.advanceTimersByTimeAsync(1000);
   });
+  await act(async () => {
+    finishDetail(response(gap));
+    await vi.advanceTimersByTimeAsync(1000);
+  });
   expect(
     Array.from(history.children, (el) => el.getAttribute('aria-label')),
   ).toEqual(rows(5002, 200).map((row) => `查看事件 ${row.id}`));
+  expect(screen.queryByRole('tabpanel')).toBeNull();
 }, 30000);
 
 test('clears a repaired gap from details after newer rows trim it from history', async () => {

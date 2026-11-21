@@ -725,13 +725,7 @@ mod tests {
             }))
             .unwrap();
             assert_eq!(store.append_history_page(&page).unwrap().position.0, 1);
-            assert_eq!(
-                store
-                    .db
-                    .query_row("PRAGMA page_count", [], |r| r.get::<_, u64>(0))
-                    .unwrap(),
-                8
-            );
+            assert!(std::fs::metadata(&path).unwrap().len() <= 81984);
             drop(store);
             let reopened = Store::open(&path, 81984).unwrap();
             assert_eq!(

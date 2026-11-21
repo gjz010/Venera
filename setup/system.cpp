@@ -222,8 +222,7 @@ SystemState inspect()
             auto args = CommandLineToArgvW(config->lpBinaryPathName, &count);
             if (args && count == 2 && _wcsicmp(args[1], L"service") == 0 &&
                 _wcsicmp(std::filesystem::path(args[0]).filename().c_str(), L"venera-debug-guest.exe") == 0) {
-                s.collector_path = args[0];
-                c.collector = std::filesystem::is_regular_file(s.collector_path);
+                c.collector = std::filesystem::is_regular_file(args[0]);
             }
             LocalFree(args);
         }

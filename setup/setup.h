@@ -74,7 +74,6 @@ struct SystemState {
     std::vector<DriverPackage> packages;
     bool cert_exists = false;
     components::Observed components;
-    std::wstring collector_path;
 
     std::wstring summary() const;
 };

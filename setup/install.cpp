@@ -1036,7 +1036,7 @@ bool install(const SystemState& state, const std::wstring& version, const Progre
         recorded = components::completed(recorded, plan.selected, false, false, true);
         save_selection();
     }
-    std::wstring collector = state.collector_path;
+    std::wstring collector;
 
     if (plan.graphics) {
         progress(25, state.cert_exists ? L"Checking the signing certificate" : L"Creating the signing certificate");
@@ -1089,20 +1089,11 @@ bool install(const SystemState& state, const std::wstring& version, const Progre
     save_selection();
     if (plan.selected.collector && (plan.collector_install || plan.transport_install)) {
         progress(90, L"Installing the debug collector");
-        if (collector.empty() || !fs::is_regular_file(collector)) {
-            for (const auto& package : state.packages) {
-                if (!package.ours())
-                    continue;
-                wchar_t stored[MAX_PATH];
-                if (SetupGetInfDriverStoreLocationW((inf_dir() + L"\\" + package.inf).c_str(), nullptr, nullptr,
-                                                    stored, ARRAYSIZE(stored), nullptr)) {
-                    auto candidate = fs::path(stored).parent_path() / L"venera-debug-guest.exe";
-                    if (fs::is_regular_file(candidate)) {
-                        collector = candidate.wstring();
-                        break;
-                    }
-                }
-            }
+        if (collector.empty() && !state.device_inf.empty() && _wcsicmp(state.device_provider.c_str(), kProvider) == 0) {
+            wchar_t stored[MAX_PATH];
+            if (SetupGetInfDriverStoreLocationW((inf_dir() + L"\\" + state.device_inf).c_str(), nullptr, nullptr,
+                                                stored, ARRAYSIZE(stored), nullptr))
+                collector = (fs::path(stored).parent_path() / L"venera-debug-guest.exe").wstring();
         }
         if (collector.empty() || !fs::is_regular_file(collector))
             fail(L"Repair Graphics to restore the debug collector files", ERROR_FILE_NOT_FOUND);

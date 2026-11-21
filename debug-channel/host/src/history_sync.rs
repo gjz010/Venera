@@ -306,11 +306,10 @@ fn session(
                     next = v1::Method::HistoryRead;
                 }
                 v1::Method::HistoryRead => {
-                    let page = match client.history_encoding() {
-                        v1::HistoryEncoding::Attribution => serde_json::from_str(&value.to_string())?,
-                        v1::HistoryEncoding::Compatibility => {
-                            store::compatibility_page(serde_json::from_str(&value.to_string())?)
-                        }
+                    use venera_debug_protocol::client::HistoryReply;
+                    let page = match reply.history_page.ok_or("missing decoded history page")? {
+                        HistoryReply::Attribution(page) => page,
+                        HistoryReply::Compatibility(page) => store::compatibility_page(page),
                     };
                     consumer.attribution_page(&page).map_err(|e| e.message)?;
                     originals.clear();

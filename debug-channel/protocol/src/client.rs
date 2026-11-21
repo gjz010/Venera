@@ -69,6 +69,28 @@ pub struct Reply {
     pub id: String,
     pub method: Method,
     pub result: RpcResult<Value>,
+    pub history_page: Option<HistoryReply>,
+}
+
+pub enum HistoryReply {
+    Compatibility(HistoryPage),
+    Attribution(AttributionHistoryPage),
+}
+
+impl HistoryReply {
+    fn decode(encoding: HistoryEncoding, value: &Value) -> RpcResult<Self> {
+        // Decode from JSON text so extension numbers outside u64 retain their precision.
+        let text = value.to_string();
+        let invalid = |_| RpcError::new(-32004, "Invalid guest result");
+        match encoding {
+            HistoryEncoding::Compatibility => serde_json::from_str(&text).map(Self::Compatibility).map_err(invalid),
+            HistoryEncoding::Attribution => {
+                let page: AttributionHistoryPage = serde_json::from_str(&text).map_err(invalid)?;
+                page.validate_revisions()?;
+                Ok(Self::Attribution(page))
+            }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -99,7 +121,7 @@ pub fn validate_result(method: Method, value: &Value) -> RpcResult<()> {
         }
         Method::SystemInfoGet => serde_json::from_value::<SystemInfo>(value.clone()).is_ok(),
         Method::HistoryRange => serde_json::from_value::<HistoryRange>(value.clone()).is_ok(),
-        Method::HistoryRead => serde_json::from_str::<HistoryPage>(&value.to_string()).is_ok(),
+        Method::HistoryRead => HistoryReply::decode(HistoryEncoding::Compatibility, value).is_ok(),
         Method::HistoryAck => serde_json::from_value::<HistoryAck>(value.clone()).is_ok(),
         _ => false,
     };
@@ -267,13 +289,10 @@ impl Client {
                         let Some(method) = self.calls.remove(&id) else {
                             continue;
                         };
+                        let mut history_page = None;
                         let result = result.and_then(|value| {
-                            if method == Method::HistoryRead
-                                && self.history_encoding() == HistoryEncoding::Attribution
-                            {
-                                serde_json::from_str::<AttributionHistoryPage>(&value.to_string())
-                                    .map_err(|_| RpcError::new(-32004, "Invalid guest result"))?
-                                    .validate_revisions()?;
+                            if method == Method::HistoryRead {
+                                history_page = Some(HistoryReply::decode(self.history_encoding(), &value)?);
                             } else {
                                 validate_result(method, &value)?;
                             }
@@ -282,7 +301,7 @@ impl Client {
                         if matches!(method, Method::EndpointInfo | Method::Discover) {
                             self.negotiation.accept(method, result.clone());
                         }
-                        replies.push(Reply { id, method, result });
+                        replies.push(Reply { id, method, result, history_page });
                     }
                     PacketItem::Request(request) => {
                         let result = match request.incoming {

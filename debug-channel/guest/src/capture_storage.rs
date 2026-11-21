@@ -116,15 +116,25 @@ impl ImportDiagnostics {
 }
 
 fn group(name: &str) -> Option<usize> {
-    [
-        "kernel-boot.etl",
-        "legacy-boot.etl",
-        "kernel-live-",
-        "legacy-live-",
-        "recorder-v1-",
-    ]
-    .iter()
-    .position(|prefix| name.starts_with(prefix))
+    let decimal = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let (base, rotation) = name.split_once(".etl")?;
+    if !rotation.is_empty() && !rotation.strip_prefix('.').is_some_and(decimal) {
+        return None;
+    }
+    match base {
+        "kernel-boot" => Some(0),
+        "legacy-boot" => Some(1),
+        _ if base.strip_prefix("kernel-live-").is_some_and(decimal) => Some(2),
+        _ if base.strip_prefix("legacy-live-").is_some_and(decimal) => Some(3),
+        _ => {
+            let (guid, time) = base.strip_prefix("recorder-v1-")?.rsplit_once('-')?;
+            (rotation.is_empty() && decimal(time) && guid.len() == 36 &&
+                guid.bytes().enumerate().all(|(i, b)| match i {
+                    8 | 13 | 18 | 23 => b == b'-',
+                    _ => b.is_ascii_hexdigit(),
+                })).then_some(4)
+        }
+    }
 }
 
 #[derive(Default)]
@@ -245,22 +255,22 @@ mod tests {
         ));
         fs::create_dir(&dir).unwrap();
         let trace = dir.join("kernel-boot.etl.001");
-        let unrelated = dir.join("notes.txt");
-        let folder = dir.join("kernel-live-folder.etl");
+        let unrelated = dir.join("kernel-boot.etl.bak");
+        let folder = dir.join("kernel-live-10.etl");
         let nested = folder.join("kernel-live-nested.etl");
         fs::write(&trace, b"trace").unwrap();
         fs::write(&unrelated, b"notes").unwrap();
         fs::create_dir(&folder).unwrap();
         fs::write(&nested, b"nested trace").unwrap();
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&trace, dir.join("kernel-live-link.etl")).unwrap();
+        std::os::unix::fs::symlink(&trace, dir.join("kernel-live-11.etl")).unwrap();
 
         let mut skipped = SkippedEntries::default();
         assert_eq!(scan(&dir, &mut skipped).unwrap(), [trace]);
         assert_eq!(
             skipped.health().unwrap(),
             json!({"skipped": if cfg!(unix) { 3 } else { 2 },
-                   "file": "kernel-live-folder.etl", "reason": "non-regular entry"})
+                   "file": "kernel-boot.etl.bak", "reason": "unrecognized name"})
         );
         assert_eq!(fs::read(unrelated).unwrap(), b"notes");
         assert_eq!(fs::read(nested).unwrap(), b"nested trace");
@@ -359,14 +369,14 @@ mod tests {
             }
         }
         for index in 0..2 {
-            files.push((format!("recorder-v1-{index}.etl"), 4 * 1024 * 1024 + 65536));
+            files.push((format!("recorder-v1-00000000-0000-0000-0000-000000000000-{index}.etl"), 4 * 1024 * 1024 + 65536));
         }
         validate(&files).unwrap();
         assert_eq!(
             JOURNAL_BYTES + files.iter().map(|(_, size)| size).sum::<u64>(),
             1_073_479_680
         );
-        files.push(("kernel-live-extra.etl".into(), 1));
+        files.push(("kernel-live-3.etl".into(), 1));
         assert_eq!(
             validate(&files).unwrap_err().kind(),
             std::io::ErrorKind::StorageFull

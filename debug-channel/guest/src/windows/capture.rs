@@ -663,8 +663,8 @@ mod tests {
         use venera_debug_protocol::v1::{HistoryEvent, HistoryRead};
         let dir = std::env::temp_dir().join(format!("venera-graphics-{}", clock::filetime()));
         fs::create_dir_all(&dir).unwrap();
-        let first = dir.join("kernel-live-first.etl");
-        let second = dir.join("kernel-live-second.etl");
+        let first = dir.join("kernel-live-1.etl");
+        let second = dir.join("kernel-live-2.etl");
         let mut session = FileSession::start(&format!("Venera graphics {}", clock::filetime()), &first, 0, 32).unwrap();
         let mut provider = 0;
         unsafe {
@@ -731,7 +731,7 @@ mod tests {
         fs::create_dir_all(&capture).unwrap();
         let original = directory.join("original.etl");
         fs::write(&original, b"captured event bytes").unwrap();
-        let active = capture.join("kernel-live-active.etl");
+        let active = capture.join("kernel-live-10.etl");
         fs::File::create(&active).unwrap().set_len(65536).unwrap();
         let replay = replay_source(&original, &capture);
         assert_ne!(
@@ -822,7 +822,7 @@ mod tests {
         fs::create_dir(&directory).unwrap();
         let capture = directory.join("capture");
         fs::create_dir(&capture).unwrap();
-        let replay = capture.join("recorder-v1-5b4a52f6-c9de-3944-ec13-d1aa98628939-sample.etl");
+        let replay = capture.join("recorder-v1-5b4a52f6-c9de-3944-ec13-d1aa98628939-1.etl");
         fs::copy(&original, &replay).unwrap();
         let source = files::header(&replay).unwrap();
         let summary = files::read(&replay, &mut |_, _, _| Ok(())).unwrap();
@@ -1156,7 +1156,7 @@ mod tests {
         let capture = directory.join("capture");
         fs::create_dir_all(&capture).unwrap();
         println!("Performance evidence: {}", directory.display());
-        let file = capture.join("kernel-live-measure.etl");
+        let file = capture.join("kernel-live-1.etl");
         let session = if enabled {
             let session = FileSession::start(
                 &format!("Venera process cost {}", std::process::id()),
@@ -2569,11 +2569,11 @@ mod tests {
             active: next.clone(),
             prefix: "kernel-live-",
         }];
-        let damaged = capture.join("recorder-v1-00000000-0000-0000-0000-000000000000-partial.etl");
+        let damaged = capture.join("recorder-v1-00000000-0000-0000-0000-000000000000-1.etl");
         if damaged_recorder {
             fs::write(&damaged, b"partial trace header").unwrap();
         }
-        let unrelated = capture.join("foreign.etl");
+        let unrelated = capture.join("kernel-boot.etl.bak");
         fs::write(&unrelated, b"unrelated data").unwrap();
         let folder = capture.join("legacy-live-folder.etl");
         fs::create_dir(&folder).unwrap();
@@ -2586,7 +2586,7 @@ mod tests {
         assert_eq!(fs::read(nested).unwrap(), b"nested data");
         assert_eq!(
             state.lock().unwrap().status.health["capture_scan"],
-            serde_json::json!({"skipped": 2, "file": "foreign.etl", "reason": "unrecognized name"})
+            serde_json::json!({"skipped": 2, "file": "kernel-boot.etl.bak", "reason": "unrecognized name"})
         );
         assert_eq!(
             history.range().unwrap().high_water.0,
@@ -2656,7 +2656,7 @@ mod tests {
             let (history, owner) = crate::history::History::start(journal, stop.clone()).unwrap();
             let state = Arc::new(Mutex::new(State::new("capacity".into(), true)));
             state.lock().unwrap().boot_id = clock::boot_id().unwrap();
-            let first = capture.join(format!("{prefix}first.etl"));
+            let first = capture.join(format!("{prefix}1.etl"));
             let name = format!("Venera capacity recovery {}", clock::filetime());
             let session = FileSession::start(&name, &first, 0, 32).unwrap();
             let mut provider = 0;
@@ -2777,7 +2777,7 @@ mod tests {
             std::env::temp_dir().join(format!("venera-recorder-recovery-{}", clock::filetime()));
         fs::create_dir(&directory).unwrap();
         let path =
-            directory.join("recorder-v1-00000000-0000-0000-0000-000000000000-interrupted.etl");
+            directory.join("recorder-v1-00000000-0000-0000-0000-000000000000-1.etl");
         let name = format!("Venera Recorder replay {}", std::process::id());
         let mut session = FileSession::start(&name, &path, 0, 4).unwrap();
         session.retain();

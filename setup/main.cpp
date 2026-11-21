@@ -198,6 +198,10 @@ int run_install(const Options& opts)
         action = choice == kModify ? components::Action::Modify : choice == kRepair ? components::Action::Repair :
             components::Action::Update;
     }
+    if ((action == components::Action::Modify || action == components::Action::Repair) &&
+        version != s.installed_version)
+        fail(L"To modify or repair Venera, use the installed setup in Apps & features. "
+             L"To change versions, run the matching installation or update task.", ERROR_PRODUCT_VERSION);
     auto selected = opts.has_components ? opts.selected : components::current_selection(s.components);
     auto validate = [&] {
         auto plan = components::plan(s.components, action, selected);

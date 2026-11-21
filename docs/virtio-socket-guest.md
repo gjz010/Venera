@@ -20,7 +20,7 @@ For unattended installation with collection:
 .\venera-setup.exe /S /components=graphics,panel,collector,transport
 ```
 
-Run setup again to modify the selection or repair the installed components. Examples from elevated PowerShell:
+Use the installed setup in Apps & features, or setup media matching the installed version, to modify the selection or repair the installed components. Examples from elevated PowerShell:
 
 ```powershell
 .\venera-setup.exe /modify /S /components=graphics,panel,collector,transport

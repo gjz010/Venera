@@ -327,7 +327,7 @@ fn control_packet(
     packet: v1::RpcPacket,
     local: bool,
     busy: bool,
-    connection: &Value,
+    connection: impl Fn(&Client) -> Value,
     client: &mut Client,
 ) -> Result<()> {
     p.batch = Some(packet.batch);
@@ -338,7 +338,7 @@ fn control_packet(
                 continue;
             };
             let immediate = if local {
-                Some(Ok(connection.clone()))
+                Some(Ok(connection(client)))
             } else if method == v1::Method::EndpointInfo {
                 Some(Ok(serde_json::to_value(host_endpoint())?))
             } else if busy || p.id.is_some() {
@@ -674,16 +674,25 @@ fn collect(
                     Err(e) => return Err(e.into()),
                 }
             }
-            let endpoint = client.peer().endpoint();
-            let connection = json!({"transport":"VirtIO socket","connected":guest.is_some(),"last_received_at":last_received_at,
-            "history":history_status.lock().unwrap().clone(),
-            "archive_writes":diagnostics.status.lock().unwrap().clone(),
-            "protocol_version":endpoint.map(|v|&v.protocol_version),"software_version":endpoint.map(|v|&v.software_version),"role":endpoint.map(|v|v.role),
-            "discovered_methods":client.peer().discovery().map(|d|d.methods.iter().map(|m|m.name.clone()).collect::<Vec<_>>()),"ready":client.require(v1::Method::Discover).is_ok()});
+            let connection = |client: &Client| {
+                let endpoint = client.peer().endpoint();
+                json!({
+                    "transport": "VirtIO socket",
+                    "connected": guest.is_some(),
+                    "last_received_at": last_received_at,
+                    "history": history_status.lock().unwrap().clone(),
+                    "archive_writes": diagnostics.status.lock().unwrap().clone(),
+                    "protocol_version": endpoint.map(|v| &v.protocol_version),
+                    "software_version": endpoint.map(|v| &v.software_version),
+                    "role": endpoint.map(|v| v.role),
+                    "discovered_methods": client.peer().discovery().map(|d| d.methods.iter().map(|m| &m.name).collect::<Vec<_>>()),
+                    "ready": client.require(v1::Method::Discover).is_ok(),
+                })
+            };
             for p in &mut busy {
                 if p.response.is_none() {
                     if let Some((packet, local)) = read_control(p) {
-                        control_packet(p, packet, local, true, &connection, &mut client)?;
+                        control_packet(p, packet, local, true, connection, &mut client)?;
                     }
                 }
             }
@@ -691,7 +700,7 @@ fn collect(
             if let Some(p) = pending.as_mut() {
                 if p.id.is_none() && p.response.is_none() {
                     if let Some((packet, local)) = read_control(p) {
-                        control_packet(p, packet, local, false, &connection, &mut client)?;
+                        control_packet(p, packet, local, false, connection, &mut client)?;
                     }
                 }
             }

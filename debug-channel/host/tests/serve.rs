@@ -711,6 +711,10 @@ fn concurrent_requests_are_rejected_and_keep_local_correlation() {
         json!({"filter":{"components":[],"levels":[],"targets":[]}}),
     );
     let req = read_request(&mut reader, "filter.set");
+    let mut query = control(dir.path(), "connection", "connection.get", json!({}));
+    let snapshot = read_message(&mut query);
+    assert_eq!(snapshot["id"], "connection");
+    assert_eq!(snapshot["result"]["connected"], true);
     let second = control(dir.path(), "second", "filter.reset", json!({}));
     let mut second = second;
     let third = control(dir.path(), "third", "status.get", json!({}));

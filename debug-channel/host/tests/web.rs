@@ -125,6 +125,9 @@ impl Server {
         self.request("GET", path)
     }
     fn request(&self, method: &str, path: &str) -> (u16, String) {
+        self.request_body(method, path, "")
+    }
+    fn request_body(&self, method: &str, path: &str, body: &str) -> (u16, String) {
         let deadline = Instant::now() + Duration::from_secs(10);
         let mut stream = loop {
             match TcpStream::connect(self.addr) {
@@ -143,7 +146,7 @@ impl Server {
             .unwrap();
         write!(
             stream,
-            "{method} {path} HTTP/1.0\r\nHost: localhost\r\n\r\n"
+            "{method} {path} HTTP/1.0\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len()
         )
         .unwrap();
         let mut response = String::new();
@@ -194,6 +197,17 @@ fn following_reconciles_gap_ids_in_the_requested_window() {
     let updates = server.json("/api/events?after=101&gap_window=100:101&q=nomatch");
     assert_eq!(updates["retained_gaps"], json!(["101"]));
     assert_eq!(updates["next_id"], "102");
+
+    let follow = |ids: Value| server.request_body("POST", "/api/events/follow?after=101&q=nomatch",
+        &json!({"gap_ids": ids}).to_string());
+    let (status, body) = follow(json!(["100", "101", "9007199254740993"]));
+    assert_eq!(status, 200, "{body}");
+    let page: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(page["removed_gaps"], json!(["100", "9007199254740993"]));
+    assert_eq!(page["events"], json!([]));
+    assert_eq!(page["next_id"], "102");
+    assert_eq!(follow(json!(vec!["101"; 5002])).0, 400);
+    assert_eq!(follow(json!(["2.5"])).0, 400);
 }
 
 #[test]

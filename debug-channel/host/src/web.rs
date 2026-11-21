@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, Query, State, rejection::QueryRejection},
     http::{StatusCode, header},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
 };
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::Deserialize;
@@ -158,6 +158,37 @@ async fn events(
     query: std::result::Result<Query<EventsQuery>, QueryRejection>,
 ) -> std::result::Result<Json<Value>, ApiError> {
     let Query(query) = query.map_err(bad)?;
+    event_page(path, query, None).await
+}
+
+#[derive(Deserialize)]
+struct FollowBody {
+    gap_ids: Vec<String>,
+}
+
+async fn follow(
+    State(path): State<PathBuf>,
+    query: std::result::Result<Query<EventsQuery>, QueryRejection>,
+    Json(body): Json<FollowBody>,
+) -> std::result::Result<Json<Value>, ApiError> {
+    let Query(query) = query.map_err(bad)?;
+    if query.after.is_none() || query.gap_window.is_some() {
+        return Err(bad("Follow requires an after cursor and uses gap_ids for reconciliation"));
+    }
+    if body.gap_ids.len() > 5001 {
+        return Err(bad("Follow accepts at most 5001 gap IDs"));
+    }
+    for value in &body.gap_ids {
+        id(value)?;
+    }
+    event_page(path, query, Some(body.gap_ids)).await
+}
+
+async fn event_page(
+    path: PathBuf,
+    query: EventsQuery,
+    gap_ids: Option<Vec<String>>,
+) -> std::result::Result<Json<Value>, ApiError> {
     let limit = query.limit.unwrap_or(200);
     if !(1..=1000).contains(&limit) {
         return Err(bad("Limit must be between 1 and 1000"));
@@ -214,6 +245,13 @@ async fn events(
         }
         if after.is_none() { events.reverse(); }
         let mut page = json!({"events":events,"changes":changes,"next_id":next.to_string(),"oldest_id":oldest.map(|v| v.to_string()),"latest_id":latest.map(|v| v.to_string())});
+        if let Some(ids) = gap_ids {
+            let mut missing = db.prepare("SELECT r.value FROM json_each(?1) r WHERE NOT EXISTS (
+                SELECT 1 FROM history_missing g JOIN events e ON e.id=g.id WHERE g.id=CAST(r.value AS INTEGER))").map_err(internal)?;
+            let removed = missing.query_map([serde_json::to_string(&ids).map_err(internal)?], |r| r.get::<_, String>(0))
+                .map_err(internal)?.collect::<rusqlite::Result<Vec<_>>>().map_err(internal)?;
+            page["removed_gaps"] = json!(removed);
+        }
         if let (Some((first, last)), Some(after)) = (gap_window, after) {
             if next > after {
                 // Reconcile displayed retention gaps in the same snapshot as the new events.
@@ -388,6 +426,7 @@ pub async fn serve(
             get(|| async { Json(json!({"status":"ok"})) }),
         )
         .route("/api/events", get(events))
+        .route("/api/events/follow", post(follow))
         .route("/api/events/{id}", get(detail))
         .route("/api/export", get(export))
         .route("/api", get(api_missing))

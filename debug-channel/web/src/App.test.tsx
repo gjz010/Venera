@@ -309,11 +309,13 @@ test('clears a repaired gap from details after newer rows trim it from history',
   const pendingDetail = new Promise<Response>((resolve) => {
     finishDetail = resolve;
   });
-  vi.stubGlobal('fetch', async (input: string) => {
+  vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
     const url = new URL(input, 'http://localhost');
     if (url.pathname === '/api/events/1') return pendingDetail;
     const after = Number(url.searchParams.get('after'));
     if (!after) return page([gap]);
+    if (url.pathname === '/api/events')
+      return response({ events: [], next_id: String(after + 1) });
     const latest = after < 5001 ? 5001 : 5002;
     const events = Array.from(
       { length: Math.min(200, latest - after) },
@@ -322,16 +324,13 @@ test('clears a repaired gap from details after newer rows trim it from history',
         return { ...first, id: String(id), managed_gap: id === 5001 };
       },
     );
-    const [lo, hi] = (url.searchParams.get('gap_window') ?? '')
-      .split(':')
-      .map(Number);
+    const ids: string[] = JSON.parse(String(init?.body)).gap_ids;
     return response({
       events,
       oldest_id: '1',
       latest_id: String(latest),
-      retained_gaps: (after < 5001 ? [1] : [5001])
-        .filter((id) => lo <= id && id <= hi)
-        .map(String),
+      next_id: events.at(-1)?.id,
+      removed_gaps: after >= 5001 ? ids.filter((id) => id === '1') : [],
     });
   });
   await act(async () => {
@@ -356,7 +355,7 @@ test('clears a repaired gap from details after newer rows trim it from history',
   expect(document.querySelector('[role="tabpanel"]')).toBeNull();
 }, 30000);
 
-test('keeps a diagnostic beside the remaining gaps when a missing range changes', async () => {
+test('retries reconciliation from the displayed cursor and keeps surviving rows', async () => {
   vi.useFakeTimers();
   const gap = (id: string, start: string, end: string) => ({
     ...first,
@@ -369,25 +368,42 @@ test('keeps a diagnostic beside the remaining gaps when a missing range changes'
       last_position: end,
     },
   });
-  vi.stubGlobal('fetch', async (input: string) => {
-    const p = new URL(input, 'http://localhost').searchParams;
-    return response(
-      p.has('after')
-        ? {
-            events: [gap('3', '1', '2'), gap('4', '4', '6')],
-            retained_gaps: p.has('gap_window') ? [] : undefined,
-            oldest_id: '1',
-            latest_id: '4',
-          }
-        : {
-            events: [
-              { ...gap('1', '1', '6'), managed_gap: undefined },
-              gap('2', '1', '6'),
-            ],
-            oldest_id: '1',
-            latest_id: '2',
-          },
-    );
+  let busy = false;
+  const requests: { url: string; init?: RequestInit }[] = [];
+  let attempts = 0;
+  vi.stubGlobal('fetch', async (input: string, init?: RequestInit) => {
+    const url = new URL(input, 'http://localhost');
+    const after = url.searchParams.get('after');
+    if (!after)
+      return response({
+        events: [
+          { ...gap('1', '1', '6'), managed_gap: undefined },
+          gap('2', '1', '6'),
+          gap('3', '8', '9'),
+        ],
+        oldest_id: '1',
+        latest_id: '3',
+      });
+    requests.push({ url: input, init });
+    if (url.pathname === '/api/events')
+      return response({
+        events: busy ? [gap('5', '1', '1')] : [],
+        next_id: busy ? '5' : after,
+        oldest_id: '1',
+        latest_id: after,
+      });
+    if (++attempts === 1)
+      return new Response('{"error":"Temporarily unavailable"}', {
+        status: 503,
+      });
+    return response({
+      events: [gap('6', '4', '6')],
+      changes: [{ id: '1', event: { ...first, id: '1' } }],
+      removed_gaps: ['2'],
+      next_id: '7',
+      oldest_id: '1',
+      latest_id: '6',
+    });
   });
   await act(async () => {
     render(<App />);
@@ -396,11 +412,46 @@ test('keeps a diagnostic beside the remaining gaps when a missing range changes'
   await act(async () => {
     await vi.advanceTimersByTimeAsync(1000);
   });
+  expect(requests.map((r) => [r.url, r.init?.body])).toEqual([
+    ['/api/events?limit=1&after=3', undefined],
+  ]);
+  busy = true;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+  expect(screen.getByText('Temporarily unavailable')).toBeVisible();
+  expect(screen.getByRole('button', { name: '查看事件 2' })).toBeVisible();
+  expect(screen.queryByRole('button', { name: '查看事件 5' })).toBeNull();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+  });
   expect(
     within(screen.getByRole('region', { name: '事件历史' }))
       .getAllByRole('button')
       .map((el) => el.getAttribute('aria-label')),
-  ).toEqual(['查看事件 1', '查看事件 3', '查看事件 4']);
+  ).toEqual(['查看事件 1', '查看事件 3', '查看事件 6']);
+  expect(screen.getByRole('button', { name: '查看事件 1' })).toHaveTextContent(
+    first.message.text,
+  );
+  const post = requests.filter((r) => r.init?.method === 'POST');
+  expect(
+    post.map((r) => [
+      r.url,
+      new Headers(r.init?.headers).get('Content-Type'),
+      JSON.parse(String(r.init?.body)),
+    ]),
+  ).toEqual(
+    Array(2).fill([
+      '/api/events/follow?limit=200&after=3',
+      'application/json',
+      { gap_ids: ['2', '3'] },
+    ]),
+  );
+  busy = false;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+  expect(requests.at(-1)?.url).toBe('/api/events?limit=1&after=7');
 });
 
 test('applies late attribution to the visible row and its open details', async () => {

@@ -40,7 +40,7 @@ import { SystemInfo } from './SystemInfo';
 type Page = {
   events: LogEvent[];
   changes?: { id: string; event: LogEvent | null }[];
-  retained_gaps?: string[];
+  removed_gaps?: string[];
   next_id?: string;
   oldest_id: string | null;
   latest_id: string | null;
@@ -82,8 +82,8 @@ function query(filters: Filters) {
   }
   return params.toString();
 }
-async function read<T>(url: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(url, { signal });
+async function read<T>(url: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(url, options);
   if (!response.ok) {
     const body = await response
       .json()
@@ -298,21 +298,37 @@ export function App() {
       search.set('limit', '200');
       const after = cursor.current;
       if (after !== null) search.set('after', after);
-      let gaps = gapIds.current;
-      const selection = selectedRef.current;
-      if (selection?.managed_gap && !gaps.includes(selection.id)) {
-        gaps = [...gaps, selection.id].sort((a, b) =>
-          BigInt(a) < BigInt(b) ? -1 : 1,
-        );
-      }
-      if (after !== null && gaps.length)
-        search.set('gap_window', `${gaps[0]}:${gaps.at(-1)}`);
+      if (
+        after !== null &&
+        (gapIds.current.length || selectedRef.current?.managed_gap)
+      )
+        search.set('limit', '1');
+      const { signal } = controller;
       try {
-        const page = await read<Page>(
-          `/api/events?${search}`,
-          controller.signal,
-        );
-        if (generation !== epoch.current) return;
+        let page = await read<Page>(`/api/events?${search}`, { signal });
+        if (signal.aborted || generation !== epoch.current) return;
+        if (
+          after !== null &&
+          page.next_id &&
+          BigInt(page.next_id) > BigInt(after)
+        ) {
+          const gaps = gapIds.current;
+          const selection = selectedRef.current;
+          if (gaps.length || selection?.managed_gap) {
+            const ids =
+              selection?.managed_gap && !gaps.includes(selection.id)
+                ? [...gaps, selection.id]
+                : gaps;
+            search.set('limit', '200');
+            page = await read<Page>(`/api/events/follow?${search}`, {
+              signal,
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ gap_ids: ids }),
+            });
+            if (signal.aborted || generation !== epoch.current) return;
+          }
+        }
         if (after === null) {
           before.current = page.events[0]?.id ?? page.oldest_id;
           rows.current = [];
@@ -321,11 +337,8 @@ export function App() {
         cursor.current =
           page.next_id ?? page.events.at(-1)?.id ?? page.latest_id ?? '0';
         const changes = page.changes ?? [];
-        if (page.retained_gaps) {
-          const retained = new Set(page.retained_gaps);
-          for (const id of gaps)
-            if (!retained.has(id)) changes.push({ id, event: null });
-        }
+        for (const id of page.removed_gaps ?? [])
+          changes.push({ id, event: null });
         if (changes.length) {
           const visible = new Map(
             [...rows.current, ...page.events].map((row) => [row.id, row]),
@@ -377,7 +390,9 @@ export function App() {
     const version = detailVersion.current;
     const controller = new AbortController();
     setDetailError('');
-    void read<LogEvent>(`/api/events/${selectedId}`, controller.signal)
+    void read<LogEvent>(`/api/events/${selectedId}`, {
+      signal: controller.signal,
+    })
       .then((event) => {
         if (!controller.signal.aborted && version === detailVersion.current)
           setSelected(event);

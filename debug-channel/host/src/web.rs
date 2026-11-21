@@ -126,6 +126,7 @@ struct EventsQuery {
     limit: Option<usize>,
     before: Option<String>,
     after: Option<String>,
+    gap_window: Option<String>,
     #[serde(flatten)]
     filters: Filters,
 }
@@ -175,6 +176,10 @@ async fn events(
     }
     let before = query.before.as_deref().map(id).transpose()?;
     let after = query.after.as_deref().map(id).transpose()?;
+    let gap_window = query.gap_window.as_deref().map(|window| {
+        let (first, last) = window.split_once(':').ok_or_else(|| bad("Invalid gap window"))?;
+        Ok::<_, ApiError>((id(first)?, id(last)?))
+    }).transpose()?;
     let range = query.filters.range()?;
     let instance = query.filters.instance()?;
     tokio::task::spawn_blocking(move || -> std::result::Result<Json<Value>, ApiError> {
@@ -218,7 +223,16 @@ async fn events(
             }
         }
         if after.is_none() { events.reverse(); }
-        Ok(Json(json!({"events":events,"changes":changes,"next_id":next.to_string(),"oldest_id":oldest.map(|v| v.to_string()),"latest_id":latest.map(|v| v.to_string())})))
+        let mut page = json!({"events":events,"changes":changes,"next_id":next.to_string(),"oldest_id":oldest.map(|v| v.to_string()),"latest_id":latest.map(|v| v.to_string())});
+        if let (Some((first, last)), Some(after)) = (gap_window, after) {
+            if next > after && visible != "1" {
+                // Reconcile displayed retention gaps in the same snapshot as the new events.
+                let mut gaps = db.prepare("SELECT g.id FROM history_missing g JOIN events e ON e.id=g.id WHERE g.id BETWEEN ?1 AND ?2").map_err(internal)?;
+                let ids = gaps.query_map(params![first, last], |r| Ok(r.get::<_, i64>(0)?.to_string())).map_err(internal)?.collect::<rusqlite::Result<Vec<_>>>().map_err(internal)?;
+                page["retained_gaps"] = json!(ids);
+            }
+        }
+        Ok(Json(page))
     }).await.map_err(internal)?
 }
 async fn detail(

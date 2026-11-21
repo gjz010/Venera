@@ -40,6 +40,7 @@ import { SystemInfo } from './SystemInfo';
 type Page = {
   events: LogEvent[];
   changes?: { id: string; event: LogEvent | null }[];
+  retained_gaps?: string[];
   next_id?: string;
   oldest_id: string | null;
   latest_id: string | null;
@@ -165,6 +166,7 @@ export function App() {
   const cursor = useRef<string | null>(null);
   const before = useRef<string | null>(null);
   const rows = useRef<LogEvent[]>([]);
+  const gapIds = useRef<string[]>([]);
   const list = useRef<HTMLDivElement>(null);
   const [columnWidths, setColumnWidths] = useState([160, 170, 130, 80, 180]);
   const resizeStart = useRef<{
@@ -262,6 +264,13 @@ export function App() {
       }
     }
     rows.current = older ? merged.slice(0, 5000) : merged.slice(-5000);
+    gapIds.current = rows.current
+      .filter(
+        (row) =>
+          row.message.reason === 'retention_expired' &&
+          typeof row.message.first_position === 'string',
+      )
+      .map((row) => row.id);
     setEvents(rows.current);
     if (!older && merged.length > 5000) before.current = rows.current[0].id;
     const first = before.current;
@@ -292,6 +301,9 @@ export function App() {
       search.set('limit', '200');
       const after = cursor.current;
       if (after !== null) search.set('after', after);
+      const gaps = gapIds.current;
+      if (after !== null && gaps.length)
+        search.set('gap_window', `${gaps[0]}:${gaps.at(-1)}`);
       try {
         const page = await read<Page>(
           `/api/events?${search}`,
@@ -305,11 +317,17 @@ export function App() {
         }
         cursor.current =
           page.next_id ?? page.events.at(-1)?.id ?? page.latest_id ?? '0';
-        if (page.changes?.length) {
+        const changes = page.changes ?? [];
+        if (page.retained_gaps) {
+          const retained = new Set(page.retained_gaps);
+          for (const id of gaps)
+            if (!retained.has(id)) changes.push({ id, event: null });
+        }
+        if (changes.length) {
           const visible = new Map(
             [...rows.current, ...page.events].map((row) => [row.id, row]),
           );
-          for (const { id, event } of page.changes) {
+          for (const { id, event } of changes) {
             if (event) visible.set(id, event);
             else visible.delete(id);
             if (id === selectedRef.current) {

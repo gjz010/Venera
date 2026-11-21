@@ -170,6 +170,21 @@ impl Server {
 }
 
 #[test]
+fn following_reconciles_gap_ids_in_the_requested_window() {
+    let server = Server::start(false);
+    let db = Connection::open(server.dir.path().join("history.db")).unwrap();
+    db.execute_batch(r#"INSERT INTO events(id,received_at,message,journal_id) VALUES
+      (100,'2026-11-11T00:00:00Z','{"reason":"retention_expired","first_position":"1","last_position":"6"}','a'),
+      (101,'2026-11-11T00:00:00Z','{"reason":"retention_expired","first_position":"1","last_position":"2"}','b');"#).unwrap();
+    let page = server.json("/api/events");
+    assert_eq!(page["next_id"], "101");
+    db.execute_batch("DELETE FROM events WHERE id=100; INSERT INTO events(received_at,message) VALUES('2026-11-11T00:00:00Z','{}')").unwrap();
+    let updates = server.json("/api/events?after=101&gap_window=100:101&q=nomatch");
+    assert_eq!(updates["retained_gaps"], json!(["101"]));
+    assert_eq!(updates["next_id"], "102");
+}
+
+#[test]
 fn installed_host_serves_its_bundled_dashboard() {
     let server = Server::launch(false, true);
     assert_eq!(server.get("/"), (200, "<h1>History</h1>".into()));

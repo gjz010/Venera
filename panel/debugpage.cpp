@@ -154,6 +154,8 @@ public:
             if(stale_) connection=L"Last successful status: "+connection;
         } else connection=busy_?L"Checking…":L"Status unavailable";
         row(L"\uE703",L"Host connection",connection);
+        if(!status_.valid)
+            row(L"\uE7B8",L"Socket driver",status_.driver.empty()?L"Unknown":status_.driver);
 
         float refreshW=ui.measure(L"Refresh",Ui::kBody)+40;
         D2D1_RECT_F refreshRect={x,y,x+refreshW,y+32};
@@ -167,7 +169,7 @@ public:
             ui.button(L"Reset filter",x+bw+8,y,Reset,false); y+=40;
             if(!status_.expires.empty()) row(L"\uE81C",L"Filter expires",status_.expires);
             const wchar_t* icons[]={L"\uE7B8",L"\uE772",L"\uE71B",L"\uE703"};
-            const wchar_t* titles[]={L"Serial driver",L"Controller",L"Debug port",L"Host connection"};
+            const wchar_t* titles[]={L"Socket driver",L"Controller",L"Debug port",L"Host connection"};
             const std::wstring* values[]={&status_.driver,&status_.controller,&status_.port,&status_.host};
             Ui::Paragraph descriptions[4];
             float heights[4],bodyH=16;
@@ -253,10 +255,11 @@ private:
             }
             if(result.error.empty()) result=queryDebug(args);
             if(!result.valid) {
+                result.driver=L"Unknown";
                 SC_HANDLE manager=OpenSCManagerW(nullptr,nullptr,SC_MANAGER_CONNECT);
                 if(manager) {
-                    SC_HANDLE driver=OpenServiceW(manager,L"VirtioSerial",SERVICE_QUERY_STATUS);
-                    if(driver) CloseServiceHandle(driver);
+                    SC_HANDLE driver=OpenServiceW(manager,L"VirtioSocket",SERVICE_QUERY_STATUS);
+                    if(driver) { result.driver=L"installed"; CloseServiceHandle(driver); }
                     else if(GetLastError()==ERROR_SERVICE_DOES_NOT_EXIST) result.driver=L"missing";
                     CloseServiceHandle(manager);
                 }

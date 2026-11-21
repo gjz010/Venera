@@ -33,7 +33,7 @@ The installer is `build/win/setup/venera-setup.exe`. Its interactive installatio
 .\venera-setup.exe /S /skip-vioserial
 ```
 
-The driver can also be installed through `.\venera-setup.exe /vioserial /S`. See the [guest setup](virtio-serial-guest.md) and [host connection instructions](virtio-serial-host.md) for the complete channel configuration.
+The driver can also be installed through `.\venera-setup.exe /vioserial /S`.
 
 ## Redistribution notices
 

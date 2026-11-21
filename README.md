@@ -95,7 +95,7 @@ targets. `build/release/` contains `venera-setup-<version>.exe`, its ISO, `viose
 The workbench produces `build/debug-channel/release/venera-debug-host` and `debug-channel/web/dist`.
 Cargo downloads use `build/cargo-home` and build output uses `build/debug-channel`; existing `CARGO_HOME` and
 `CARGO_TARGET_DIR` settings take precedence for the host build and checks.
-See [host deployment](docs/virtio-serial-host.md) and [VirtIO serial packaging](docs/vioserial-distribution.md)
+See [host deployment](docs/virtio-socket-host.md) and [VirtIO serial packaging](docs/vioserial-distribution.md)
 for deployment and custom package configuration. Component build details live in
 [`icd/build.sh`](icd/build.sh), [`kmd/CMakeLists.txt`](kmd/CMakeLists.txt) and [`CMakeLists.txt`](CMakeLists.txt).
 

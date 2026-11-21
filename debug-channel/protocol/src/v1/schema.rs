@@ -87,7 +87,7 @@ pub fn document(receiver: Receiver) -> Discovery {
 pub fn reference() -> String {
     let mut text = String::from(r#"# Venera Protocol 1.0.0
 
-Rust types and method declarations generate OpenRPC 1.4.1 receiving interface documents for both endpoints. Messages use JSON-RPC 2.0, with UTF-8 JSONL transport over VirtIO Serial.
+Rust types and method declarations generate OpenRPC 1.4.1 receiving interface documents for both endpoints. Messages use JSON-RPC 2.0, with UTF-8 JSONL transport over VirtIO socket.
 
 ## Generation and Validation
 
@@ -142,7 +142,7 @@ cargo test --manifest-path debug-channel/Cargo.toml -p venera-debug-protocol --f
 python3 debug-channel/protocol/tests/v1_schema.py
 ```
 
-Python validation uses jsonschema to cover the pinned-version OpenRPC meta-Schema, component references, and shared data samples. The test fixture's SOURCE.md records the meta-Schema source. See the [debug channel](virtio-serial-host.md) for integration with the running channel and viewers.
+Python validation uses jsonschema to cover the pinned-version OpenRPC meta-Schema, component references, and shared data samples. The test fixture's SOURCE.md records the meta-Schema source. See the [debug channel](virtio-socket-host.md) for integration with the running channel and viewers.
 "#);
     text
 }

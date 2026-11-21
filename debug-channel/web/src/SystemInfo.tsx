@@ -14,8 +14,6 @@ import { type LocalizedMessage, reportMessage } from './reportMessages';
 
 type Connection = {
   transport: string;
-  channel: string;
-  socket_path: string;
   connected: boolean;
   last_received_at: string | null;
   protocol_version?: string | null;
@@ -150,20 +148,12 @@ export function SystemInfo() {
                   <dd>{connection.transport}</dd>
                 </div>
                 <div>
-                  <dt>{t('channel')}</dt>
-                  <dd>{connection.channel}</dd>
-                </div>
-                <div>
                   <dt>{t('protocolVersion')}</dt>
                   <dd>{connection.protocol_version ?? '—'}</dd>
                 </div>
                 <div>
                   <dt>{t('softwareVersion')}</dt>
                   <dd>{connection.software_version ?? '—'}</dd>
-                </div>
-                <div>
-                  <dt>{t('socket')}</dt>
-                  <dd>{connection.socket_path}</dd>
                 </div>
                 <div>
                   <dt>{t('lastReceived')}</dt>

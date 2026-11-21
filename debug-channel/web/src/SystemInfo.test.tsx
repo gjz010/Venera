@@ -37,9 +37,7 @@ function json(body: unknown, status = 200) {
 }
 
 const connection = {
-  transport: 'VirtIO Serial',
-  channel: 'graphics.venera.debug.0',
-  socket_path: '/run/venera/debug.sock',
+  transport: 'VirtIO socket',
   connected: true,
   last_received_at: null,
 };
@@ -69,7 +67,7 @@ test('采集提示贯穿连接与报告读取，完成后展示报告', async ()
   ).toBeVisible();
   expect(screen.getByRole('button', { name: '正在刷新' })).toBeDisabled();
   await act(async () => connectionResponse.resolve(json(connection)));
-  expect(screen.getByText('VirtIO Serial')).toBeVisible();
+  expect(screen.getByText('VirtIO socket')).toBeVisible();
   expect(
     screen.getByRole('status', { name: '正在采集系统信息…' }),
   ).toBeVisible();
@@ -331,9 +329,7 @@ test('展示连接上下文、系统字段与诊断提示，刷新失败保留�
       if (failed) return json({ error: '采集通道尚未配置' }, 503);
       if (url === '/api/connection')
         return json({
-          transport: 'VirtIO Serial',
-          channel: 'graphics.venera.debug.0',
-          socket_path: '/run/venera/debug.sock',
+          ...connection,
           connected: updated,
           last_received_at: updated ? '2026-11-11T10:02:00Z' : null,
         });
@@ -347,8 +343,9 @@ test('展示连接上下文、系统字段与诊断提示，刷新失败保留�
   const user = userEvent.setup();
   render(<SystemInfo />);
   expect(await screen.findByText('Graphics')).toBeVisible();
-  expect(screen.getByText('VirtIO Serial')).toBeVisible();
-  expect(screen.getByText('/run/venera/debug.sock')).toBeVisible();
+  expect(screen.getByText('VirtIO socket')).toBeVisible();
+  expect(screen.queryByText('通道名称')).not.toBeInTheDocument();
+  expect(screen.queryByText('接收端 Socket')).not.toBeInTheDocument();
   expect(screen.getByText(window.location.href)).toBeVisible();
   expect(screen.getByText('等待连接')).toBeVisible();
   expect(screen.getByText('等待首条消息')).toBeVisible();
@@ -410,14 +407,7 @@ test('系统报告保持本次采集直到用户刷新', async () => {
     'fetch',
     vi.fn(async (url: string) => {
       calls++;
-      if (url === '/api/connection')
-        return json({
-          transport: 'VirtIO Serial',
-          channel: 'graphics.venera.debug.0',
-          socket_path: '/run/debug.sock',
-          connected: true,
-          last_received_at: null,
-        });
+      if (url === '/api/connection') return json(connection);
       return json({
         ...report,
         collected_at: calls > 2 ? '2026-11-11T11:00:00Z' : report.collected_at,
@@ -444,13 +434,7 @@ test.each([200, 503])(
       vi.fn(async (url: string) => {
         if (url === '/api/connection')
           return recovered
-            ? json({
-                transport: 'VirtIO Serial',
-                channel: 'graphics.venera.debug.0',
-                socket_path: '/run/debug.sock',
-                connected: true,
-                last_received_at: null,
-              })
+            ? json(connection)
             : json(
                 {
                   ok: false,
@@ -472,10 +456,9 @@ test.each([200, 503])(
     expect(await screen.findByText('Graphics')).toBeVisible();
     expect(screen.queryByText('等待连接')).not.toBeInTheDocument();
     expect(screen.queryByText('已连接')).not.toBeInTheDocument();
-    expect(screen.queryByText('通道名称')).not.toBeInTheDocument();
     recovered = true;
     await user.click(screen.getByRole('button', { name: '刷新' }));
     expect(await screen.findByText('已连接')).toBeVisible();
-    expect(screen.getByText('graphics.venera.debug.0')).toBeVisible();
+    expect(screen.getByText('VirtIO socket')).toBeVisible();
   },
 );

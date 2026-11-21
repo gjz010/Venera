@@ -175,9 +175,7 @@ test('language changes preserve an ongoing system collection and display its ret
     if (input === '/api/system-info') return pending;
     if (input === '/api/connection')
       return json({
-        transport: 'VirtIO Serial',
-        channel: 'graphics.venera.debug.0',
-        socket_path: '/run/debug.sock',
+        transport: 'VirtIO socket',
         connected: true,
         last_received_at: null,
       });
@@ -187,7 +185,7 @@ test('language changes preserve an ongoing system collection and display its ret
   const user = userEvent.setup();
   render(<App />);
   await user.click(screen.getByRole('tab', { name: 'System information' }));
-  expect(await screen.findByText('graphics.venera.debug.0')).toBeVisible();
+  expect(await screen.findByText('VirtIO socket')).toBeVisible();
   expect(
     screen.getByRole('status', { name: 'Collecting system information…' }),
   ).toBeVisible();

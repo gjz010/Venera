@@ -566,9 +566,7 @@ test('系统导航切换后保留日志筛选、选择与跟随状态', async ()
     vi.fn(async (input: string) => {
       if (input === '/api/connection')
         return response({
-          transport: 'VirtIO Serial',
-          channel: 'graphics.venera.debug.0',
-          socket_path: '/run/debug.sock',
+          transport: 'VirtIO socket',
           connected: false,
           last_received_at: null,
         });
@@ -594,7 +592,7 @@ test('系统导航切换后保留日志筛选、选择与跟随状态', async ()
   await user.click(screen.getByRole('button', { name: '筛选' }));
   await user.type(screen.getByLabelText('组件'), 'renderer');
   await user.click(screen.getByRole('tab', { name: '系统信息' }));
-  expect(await screen.findByText('graphics.venera.debug.0')).toBeVisible();
+  expect(await screen.findByText('VirtIO socket')).toBeVisible();
   expect(screen.getByText('等待连接')).toBeVisible();
   await user.click(screen.getByRole('tab', { name: '宿主日志' }));
   expect(screen.getByLabelText('组件')).toHaveValue('renderer');

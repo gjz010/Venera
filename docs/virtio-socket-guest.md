@@ -20,7 +20,7 @@ Run setup again to modify the selection or repair the installed components. Exam
 .\venera-setup.exe /uninstall /S
 ```
 
-The installer remembers the selected components for maintenance and upgrades. The control panel installs to `%ProgramFiles%\Venera`; it locates the collector through the service configuration.
+The installer remembers the selected components for maintenance and upgrades. The control panel installs to `%ProgramFiles%\Venera`; it locates the collector through the service configuration. Panel Settings offers System, English, and Simplified Chinese language preferences. A selection applies immediately and persists across launches.
 
 For manual deployment, place `venera-debug-guest.exe` in a stable directory, switch to that directory, and register and start it from an elevated PowerShell:
 

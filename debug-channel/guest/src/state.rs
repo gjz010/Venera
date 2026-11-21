@@ -185,9 +185,27 @@ pub(crate) mod wire {
     }
     fn system_response(result: &venera_debug_protocol::SystemInfoResult) -> Value {
         if result.ok {
-            json!({"jsonrpc":"2.0","id":result.request_id,"result":v1::SystemInfo { collected_at: result.collected_at.clone(), session_id: result.session_id, sections: result.sections.iter().map(|section| v1::SystemInfoSection { title: section.title.clone(), rows: section.rows.iter().map(|row| v1::SystemInfoRow { key: row.key.clone(), value: row.value.clone(), bad: row.bad, warning: row.warning.clone() }).collect() }).collect() }})
+            json!({"jsonrpc":"2.0","id":result.request_id,"result":v1::SystemInfo {
+                collected_at: result.collected_at.clone(), session_id: result.session_id,
+                sections: result.sections.iter().map(|section| v1::SystemInfoSection {
+                    title: section.title.clone(), title_message: section.title_message.as_ref().map(localized),
+                    rows: section.rows.iter().map(|row| v1::SystemInfoRow {
+                        key: row.key.clone(), value: row.value.clone(), bad: row.bad, warning: row.warning.clone(),
+                        key_message: row.key_message.as_ref().map(localized),
+                        value_message: row.value_message.as_ref().map(localized),
+                        warning_message: row.warning_message.as_ref().map(localized),
+                    }).collect()
+                }).collect()
+            }})
         } else {
             json!({"jsonrpc":"2.0","id":result.request_id,"error":{"code":-32000,"message":result.error.as_ref().map(|e| e.message.clone()).unwrap_or_else(|| "System report failed".into()),"data":result.error}})
+        }
+    }
+    fn localized(message: &venera_debug_protocol::LocalizedMessage) -> v1::LocalizedMessage {
+        v1::LocalizedMessage {
+            id: message.id.clone(),
+            args: message.args.clone(),
+            diagnostic: message.diagnostic.clone(),
         }
     }
 

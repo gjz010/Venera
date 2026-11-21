@@ -135,6 +135,10 @@ Serde u32 decoding uses integer lexical syntax; Draft-07 integer uses mathematic
 
 Parameter Schemas follow the deserialization contract, and result Schemas follow the serialization contract. Input/Output prefixes on component names distinguish required-field and nullability rules. The Schema dialect is Draft-07, with references pointing to `/components/schemas`. Optional input fields support omission and null; output follows the type's Serde attributes.
 
+## System Report Messages
+
+Report sections carry `title` and optional `title_message`; rows carry `key`, `value`, `warning` and optional `key_message`, `value_message`, `warning_message`. Each message has a stable semantic `id` such as `report.driver`, `report.notInstalled`, or `report.memory`, an `args` array of raw strings (defaulting to an empty array), and an optional `diagnostic` suffix. Templates substitute numbered placeholders such as `{0}` with the corresponding argument, then append the diagnostic verbatim. The rendered fields provide English fallback text. Consumers use the original field when the message ID is unfamiliar or a required argument is missing. Hardware names, paths, API names, and versions retain their collected spelling.
+
 ## Validation Commands
 
 ```bash

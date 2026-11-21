@@ -133,7 +133,7 @@ build/debug-channel/release/venera-debug-host serve \
   --listen 127.0.0.1:8787
 ```
 
-This is an alternative launch example for the same service. Choose the CID and history paths for your deployment and create the parent directories first. Collection and the browser workbench share one service lifecycle and database. Enabling live following appends new records to the list; loading earlier records lets you browse backward. Page filters explore saved records, while debug channel settings in the Windows control panel manage collection and forwarding.
+This is an alternative launch example for the same service. Choose the CID and history paths for your deployment and create the parent directories first. Collection and the browser workbench share one service lifecycle and database. Enabling live following appends new records to the list; loading earlier records lets you browse backward. Page filters explore saved records, while debug channel settings in the Windows control panel manage collection and forwarding. The browser language selector offers System, English, and Simplified Chinese, applies changes immediately, and remembers the preference.
 
 Expand the toolbar's filter panel to adjust conditions alongside the event list. Header dividers resize columns, and the divider between the list and details resizes the details area; dividers also support arrow-key operation. The “Overview,” “Metadata,” and “Raw record” detail tabs show text and program information, complete fields, and copyable original content, respectively, with scrollable content areas.
 

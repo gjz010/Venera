@@ -65,6 +65,9 @@ Setup offers Graphics, Panel, Debug collector, and VirtIO debug transport compon
 the collector uses Panel and the transport package. Run setup again to modify the component selection or repair
 the installation. See the [guest guide](docs/virtio-socket-guest.md) for unattended setup and maintenance.
 
+Panel Settings and the browser workbench offer System, English, and Simplified Chinese language preferences.
+Changes take effect immediately and are remembered for the next launch.
+
 ## Building
 
 Build on Linux with the repository's Nix development shell. `flake.nix` selects the tools, including Node, Yarn,

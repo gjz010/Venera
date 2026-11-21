@@ -1030,6 +1030,14 @@ fn negotiation_timeout_reconnects_and_restores_status_queries() {
     let request = read_request(&mut reader, "status.get");
     send(&mut guest, result(request["id"].as_str().unwrap(), status()));
     assert_eq!(read_message(&mut local), result("restored", status()));
+    wait_for(s.dir.path(), |rows| {
+        rows.iter().any(|row| {
+            let event = &row["message"];
+            event["type"] == "host.connection"
+                && event["connected"] == false
+                && event["error"] == json!({"code":-32001,"message":"Handshake timed out"})
+        })
+    });
 }
 
 #[test]

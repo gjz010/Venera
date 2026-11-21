@@ -646,6 +646,7 @@ fn collect(
                 }
             }
             let mut disconnected = false;
+            let mut disconnect_error = None;
             if guest.is_some() && !status_sent && client.negotiation().failure.is_none() {
                 if client.peer().endpoint().is_some() && client.peer().discovery().is_some() {
                     status_sent = true;
@@ -655,7 +656,9 @@ fn collect(
                             .map_err(|error| error.message)?;
                     }
                 } else if client.negotiation().since.elapsed() > Duration::from_secs(5) {
-                    client.fail(v1::RpcError::new(-32001, "Handshake timed out"));
+                    let error = v1::RpcError::new(-32001, "Handshake timed out");
+                    client.fail(error.clone());
+                    disconnect_error = Some(error);
                     disconnected = true;
                 }
             }
@@ -722,10 +725,11 @@ fn collect(
             if disconnected {
                 guest = None;
                 client.disconnect();
-                diagnostics.append(
-                    json!({"major":1,"type":"host.connection","connected":false}),
-                    None,
-                )?;
+                let mut event = json!({"major":1,"type":"host.connection","connected":false});
+                if let Some(error) = disconnect_error {
+                    event["error"] = json!(error);
+                }
+                diagnostics.append(event, None)?;
                 if let Some(p) = pending.as_mut() {
                     if p.response.is_none() && p.id.is_some() {
                         p.finish(Err(outcome(

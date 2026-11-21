@@ -4,7 +4,23 @@
 
 ## Service Installation
 
-Install the VirtIO socket driver and Winsock provider in the guest. Configure the VM's [VirtIO socket device and CID](virtio-socket-host.md#qemu-and-libvirt-guest-address) for host access.
+Run `venera-setup.exe` and choose the components for this guest. Graphics is required. Panel, Debug collector, and VirtIO debug transport are selectable; the collector uses Panel and the transport. The transport package includes the official driver, both Windows provider libraries, and provider service. Configure the VM's [VirtIO socket device and CID](virtio-socket-host.md#qemu-and-libvirt-guest-address) for host access.
+
+For unattended installation with collection:
+
+```powershell
+.\venera-setup.exe /S /components=graphics,panel,collector,transport
+```
+
+Run setup again to modify the selection or repair the installed components. Examples from elevated PowerShell:
+
+```powershell
+.\venera-setup.exe /modify /S /components=graphics,panel,collector,transport
+.\venera-setup.exe /repair /S
+.\venera-setup.exe /uninstall /S
+```
+
+The installer remembers the selected components for maintenance and upgrades. The control panel installs to `%ProgramFiles%\Venera`; it locates the collector through the service configuration.
 
 For manual deployment, place `venera-debug-guest.exe` in a stable directory, switch to that directory, and register and start it from an elevated PowerShell:
 
@@ -71,3 +87,8 @@ nix develop --command cargo build --manifest-path debug-channel/Cargo.toml -p ve
 ```
 
 The Windows GNU artifact is named `venera-debug-guest.exe`.
+
+Installer builds run `scripts/fetch-viosock.sh` to prepare virtio-win 0.1.302 under `build/viosock/package`.
+For an existing complete package, set `VENERA_VIOSOCK_DIR` to its directory before building. The package contains
+`viosock.inf`, `viosock.cat`, `viosock.sys`, `viosocklib_x64.dll`, `viosocklib_x86.dll`, and
+`viosockwspsvc.exe`, together with its license materials. See the [VirtIO socket distribution](viosock-distribution.md) for package contents and licensing.

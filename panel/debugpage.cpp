@@ -191,7 +191,7 @@ public:
             }
             y+=h+4;
         }
-        if(driverMissing_) { ui.button(L"Install serial driver",x,y,Install,true); y+=40; }
+        if(driverMissing_) { ui.button(L"Install socket driver",x,y,Install,true); y+=40; }
     }
     void click(int id) override {
         if(id==Details) { detailsOpen_=!detailsOpen_; return; }
@@ -219,8 +219,8 @@ public:
             }
             std::wstring setup=std::wstring(folder)+L"\\Venera\\venera-setup.exe";
             SHELLEXECUTEINFOW info={sizeof(info)}; info.lpVerb=L"runas"; info.lpFile=setup.c_str();
-            info.lpParameters=L"/vioserial"; info.hwnd=window_; info.nShow=SW_SHOWNORMAL;
-            if(!ShellExecuteExW(&info)) status_.error=L"Serial driver setup could not start ("+std::to_wstring(GetLastError())+L").";
+            info.lpParameters=L"/viosock"; info.hwnd=window_; info.nShow=SW_SHOWNORMAL;
+            if(!ShellExecuteExW(&info)) status_.error=L"Socket driver setup could not start ("+std::to_wstring(GetLastError())+L").";
         }
     }
     bool message(UINT msg,WPARAM wp,LPARAM) override {

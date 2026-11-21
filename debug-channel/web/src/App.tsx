@@ -265,11 +265,7 @@ export function App() {
     }
     rows.current = older ? merged.slice(0, 5000) : merged.slice(-5000);
     gapIds.current = rows.current
-      .filter(
-        (row) =>
-          row.message.reason === 'retention_expired' &&
-          typeof row.message.first_position === 'string',
-      )
+      .filter((row) => row.managed_gap)
       .map((row) => row.id);
     setEvents(rows.current);
     if (!older && merged.length > 5000) before.current = rows.current[0].id;

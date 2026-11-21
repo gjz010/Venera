@@ -13,6 +13,7 @@ import './EventDetails.css';
 
 export type LogEvent = {
   id: string;
+  managed_gap?: boolean;
   received_at: string;
   message: {
     type?: string;

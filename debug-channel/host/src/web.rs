@@ -191,14 +191,22 @@ async fn events(
             "SELECT (SELECT id FROM events WHERE {visible} ORDER BY id LIMIT 1),
                     (SELECT id FROM events WHERE {visible} ORDER BY id DESC LIMIT 1)"
         ), [], |r| Ok((r.get(0)?, r.get(1)?))).map_err(internal)?;
-        let upper: i64 = db.query_row("SELECT COALESCE(MAX(id),0) FROM events", [], |r| r.get(0)).map_err(internal)?;
+        let (upper, has_gaps): (i64, bool) = db.query_row(
+            "SELECT COALESCE(MAX(id),0), EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='history_missing') FROM events",
+            [], |r| Ok((r.get(0)?, r.get(1)?)),
+        ).map_err(internal)?;
+        // Only synthetic journal rows can have a gap record. Check its primary key
+        // in the page scan, skipping the lookup for diagnostics and positioned rows.
+        let gap = if has_gaps {
+            "CASE WHEN e.journal_id IS NOT NULL AND e.position IS NULL THEN EXISTS(SELECT 1 FROM history_missing g WHERE g.id=e.id) ELSE 0 END"
+        } else { "0" };
         let sql = if after.is_some() && visible != "1" {
             // Each revision advances the scan at its own ID but delivers the current
             // projection at the original row ID, including rows leaving the filter.
-            "SELECT e.id, COALESCE(t.id,e.id), COALESCE(t.received_at,e.received_at),
-                    COALESCE(t.message,e.message), CASE WHEN t.id IS NULL THEN e.raw_message ELSE t.raw_message END, t.id IS NOT NULL
+            format!("SELECT e.id, COALESCE(t.id,e.id), COALESCE(t.received_at,e.received_at),
+                    COALESCE(t.message,e.message), CASE WHEN t.id IS NULL THEN e.raw_message ELSE t.raw_message END, t.id IS NOT NULL, {gap}
              FROM events e LEFT JOIN events t ON t.journal_id=e.journal_id AND t.position=e.revision_target
-             WHERE e.id>?1 AND e.id<=?2 AND (e.revision_target IS NULL OR t.id IS NOT NULL) ORDER BY e.id".into()
+             WHERE e.id>?1 AND e.id<=?2 AND (e.revision_target IS NULL OR t.id IS NOT NULL) ORDER BY e.id")
         } else {
             let (condition, order) = if after.is_some() {
                 ("id>?1 AND id<=?2", "ASC")
@@ -207,7 +215,7 @@ async fn events(
             } else {
                 ("id<=?2", "DESC")
             };
-            format!("SELECT id,id,received_at,message,{raw},0 FROM events WHERE {visible} AND {condition} ORDER BY id {order}")
+            format!("SELECT id,id,received_at,message,{raw},0,{gap} FROM events e WHERE {visible} AND {condition} ORDER BY id {order}")
         };
         let mut statement = db.prepare(&sql).map_err(internal)?;
         let cursor = after.or(before);
@@ -216,11 +224,12 @@ async fn events(
         let mut changes = Vec::new();
         let mut next = upper.max(after.unwrap_or(0));
         while let Some(row) = rows.next().map_err(internal)? {
-            let value = event(row.get(1).map_err(internal)?, row.get(2).map_err(internal)?, row.get(3).map_err(internal)?, row.get(4).map_err(internal)?).map_err(internal)?;
+            let mut value = event(row.get(1).map_err(internal)?, row.get(2).map_err(internal)?, row.get(3).map_err(internal)?, row.get(4).map_err(internal)?).map_err(internal)?;
             let matches = range.contains(value["received_at"].as_str().unwrap()).map_err(internal)? && query.filters.matches(&value["message"], instance.as_ref());
             if row.get::<_,bool>(5).map_err(internal)? {
                 changes.push(json!({"id":value["id"],"event":matches.then_some(&value)}));
             } else if matches {
+                if row.get::<_,bool>(6).map_err(internal)? { value["managed_gap"] = json!(true); }
                 events.push(value);
             }
             if events.len() + changes.len() == limit {
@@ -231,7 +240,7 @@ async fn events(
         if after.is_none() { events.reverse(); }
         let mut page = json!({"events":events,"changes":changes,"next_id":next.to_string(),"oldest_id":oldest.map(|v| v.to_string()),"latest_id":latest.map(|v| v.to_string())});
         if let (Some((first, last)), Some(after)) = (gap_window, after) {
-            if next > after && visible != "1" {
+            if next > after && has_gaps {
                 // Reconcile displayed retention gaps in the same snapshot as the new events.
                 let mut gaps = db.prepare("SELECT g.id FROM history_missing g JOIN events e ON e.id=g.id WHERE g.id BETWEEN ?1 AND ?2").map_err(internal)?;
                 let ids = gaps.query_map(params![first, last], |r| Ok(r.get::<_, i64>(0)?.to_string())).map_err(internal)?.collect::<rusqlite::Result<Vec<_>>>().map_err(internal)?;

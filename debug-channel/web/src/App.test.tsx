@@ -302,11 +302,12 @@ test('returns to a contiguous live tail after filling the history window', async
   ).toEqual(rows(5002, 200).map((row) => `查看事件 ${row.id}`));
 }, 30000);
 
-test('follows the remaining gaps after part of a missing range arrives', async () => {
+test('keeps a diagnostic beside the remaining gaps when a missing range changes', async () => {
   vi.useFakeTimers();
   const gap = (id: string, start: string, end: string) => ({
     ...first,
     id,
+    managed_gap: true,
     message: {
       type: 'gap',
       reason: 'retention_expired',
@@ -319,12 +320,19 @@ test('follows the remaining gaps after part of a missing range arrives', async (
     return response(
       p.has('after')
         ? {
-            events: [gap('2', '1', '2'), gap('3', '4', '6')],
-            retained_gaps: p.get('gap_window') === '1:1' ? [] : undefined,
-            oldest_id: '2',
-            latest_id: '3',
+            events: [gap('3', '1', '2'), gap('4', '4', '6')],
+            retained_gaps: p.has('gap_window') ? [] : undefined,
+            oldest_id: '1',
+            latest_id: '4',
           }
-        : { events: [gap('1', '1', '6')], oldest_id: '1', latest_id: '1' },
+        : {
+            events: [
+              { ...gap('1', '1', '6'), managed_gap: undefined },
+              gap('2', '1', '6'),
+            ],
+            oldest_id: '1',
+            latest_id: '2',
+          },
     );
   });
   await act(async () => {
@@ -338,7 +346,7 @@ test('follows the remaining gaps after part of a missing range arrives', async (
     within(screen.getByRole('region', { name: '事件历史' }))
       .getAllByRole('button')
       .map((el) => el.getAttribute('aria-label')),
-  ).toEqual(['查看事件 2', '查看事件 3']);
+  ).toEqual(['查看事件 1', '查看事件 3', '查看事件 4']);
 });
 
 test('applies late attribution to the visible row and its open details', async () => {

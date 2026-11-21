@@ -176,8 +176,18 @@ fn following_reconciles_gap_ids_in_the_requested_window() {
     db.execute_batch(r#"INSERT INTO events(id,received_at,message,journal_id) VALUES
       (100,'2026-11-11T00:00:00Z','{"reason":"retention_expired","first_position":"1","last_position":"6"}','a'),
       (101,'2026-11-11T00:00:00Z','{"reason":"retention_expired","first_position":"1","last_position":"2"}','b');"#).unwrap();
+    // The diagnostic carries the same message as the synthetic gap.
+    db.execute_batch("INSERT INTO events(id,received_at,message) SELECT 99,received_at,message FROM events WHERE id=100").unwrap();
     let page = server.json("/api/events");
     assert_eq!(page["next_id"], "101");
+    for page in [page, server.json("/api/events?after=98"), server.json("/api/events?before=102")] {
+        let rows = page["events"].as_array().unwrap();
+        assert_eq!(rows[0]["id"], "99");
+        assert_eq!(rows[0]["message"], rows[1]["message"]);
+        assert!(rows[0].get("managed_gap").is_none());
+        assert_eq!(rows[1]["id"], "100");
+        assert_eq!(rows[1]["managed_gap"], true);
+    }
     db.execute_batch("DELETE FROM events WHERE id=100; INSERT INTO events(received_at,message) VALUES('2026-11-11T00:00:00Z','{}')").unwrap();
     let updates = server.json("/api/events?after=101&gap_window=100:101&q=nomatch");
     assert_eq!(updates["retained_gaps"], json!(["101"]));

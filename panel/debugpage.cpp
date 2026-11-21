@@ -239,7 +239,7 @@ public:
             }
             std::wstring setup=std::wstring(folder)+L"\\Venera\\venera-setup.exe";
             SHELLEXECUTEINFOW info={sizeof(info)}; info.lpVerb=L"runas"; info.lpFile=setup.c_str();
-            info.lpParameters=L"/viosock"; info.hwnd=window_; info.nShow=SW_SHOWNORMAL;
+            info.lpParameters=L"/modify"; info.hwnd=window_; info.nShow=SW_SHOWNORMAL;
             if(!ShellExecuteExW(&info)) status_.error={IDS_SocketSetupFailed, {std::to_wstring(GetLastError())}};
         }
     }

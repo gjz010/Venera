@@ -65,14 +65,20 @@ export function setLanguagePreference(preference: LanguagePreference) {
   return i18n.changeLanguage(preferenceLocale(preference));
 }
 
+const dateFormats = new Map<string | undefined, Intl.DateTimeFormat>();
+
 export function formatDate(value: string, locale = i18n.resolvedLanguage) {
   const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? value
-    : new Intl.DateTimeFormat(locale, {
-        dateStyle: 'medium',
-        timeStyle: 'medium',
-      }).format(date);
+  if (Number.isNaN(date.getTime())) return value;
+  let format = dateFormats.get(locale);
+  if (!format) {
+    format = new Intl.DateTimeFormat(locale, {
+      dateStyle: 'medium',
+      timeStyle: 'medium',
+    });
+    dateFormats.set(locale, format);
+  }
+  return format.format(date);
 }
 
 const enumKeys = {

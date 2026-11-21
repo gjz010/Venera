@@ -248,7 +248,7 @@ export function App() {
     return () => media.removeEventListener('change', update);
   }, []);
 
-  function merge(batch: LogEvent[], older: boolean, oldest: string | null) {
+  function merge(batch: LogEvent[], older: boolean) {
     const ids = new Set(rows.current.map((event) => event.id));
     const fresh = batch.filter((event) => !ids.has(event.id));
     const merged = [...rows.current, ...fresh];
@@ -273,6 +273,8 @@ export function App() {
       .map((row) => row.id);
     setEvents(rows.current);
     if (!older && merged.length > 5000) before.current = rows.current[0].id;
+  }
+  function updateOlder(oldest: string | null) {
     const first = before.current;
     setHasOlder(Boolean(first && oldest && BigInt(first) > BigInt(oldest)));
   }
@@ -340,8 +342,10 @@ export function App() {
           rows.current = Array.from(visible.values()).sort((a, b) =>
             BigInt(a.id) < BigInt(b.id) ? -1 : 1,
           );
-          mergeRef.current([], false, page.oldest_id);
-        } else mergeRef.current(page.events, false, page.oldest_id);
+          mergeRef.current([], false);
+        } else if (after === null || page.events.length)
+          mergeRef.current(page.events, false);
+        updateOlder(page.oldest_id);
         setError('');
       } catch (reason) {
         if (!controller.signal.aborted && generation === epoch.current)
@@ -398,7 +402,8 @@ export function App() {
       const page = await read<Page>(`/api/events?${search}`);
       if (generation !== epoch.current) return;
       before.current = page.events[0]?.id ?? null;
-      mergeRef.current(page.events, true, page.oldest_id);
+      if (page.events.length) mergeRef.current(page.events, true);
+      updateOlder(page.oldest_id);
       setError('');
     } catch (reason) {
       if (generation === epoch.current)

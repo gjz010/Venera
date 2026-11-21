@@ -149,6 +149,34 @@ test('实时追加去重，暂停后保留历史与筛选', async () => {
   expect(within(region).getByText('帧提交完成')).toBeInTheDocument();
 });
 
+test('keeps the reading position through an idle poll and follows a new row', async () => {
+  vi.useFakeTimers();
+  let incoming = false;
+  vi.stubGlobal('fetch', async (url: string) =>
+    page(url.includes('after=') ? (incoming ? [second] : []) : [first]),
+  );
+  await act(async () => {
+    render(<App />);
+  });
+  const history = screen.getByRole('region', { name: '事件历史' });
+  const viewport = history.closest<HTMLElement>('.table-scroll')!;
+  Object.defineProperty(viewport, 'scrollHeight', { value: 400 });
+  viewport.scrollTo = (options?: ScrollToOptions | number) => {
+    if (typeof options === 'object') viewport.scrollTop = options.top ?? 0;
+  };
+  viewport.scrollTop = 20;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+  expect(viewport.scrollTop).toBe(20);
+  incoming = true;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+  expect(viewport.scrollTop).toBe(400);
+  expect(within(history).getByText('设备重试 恢复成功')).toBeVisible();
+});
+
 test('follows the entire first burst after opening an empty archive', async () => {
   vi.useFakeTimers();
   const burst = Array.from({ length: 250 }, (_, i) => ({

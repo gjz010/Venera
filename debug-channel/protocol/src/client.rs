@@ -1,6 +1,5 @@
 //! Connection-scoped RPC negotiation and history consumption.
 use crate::v1::*;
-use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
@@ -80,17 +79,15 @@ pub enum HistoryReply {
 
 impl HistoryReply {
     fn decode(encoding: HistoryEncoding, value: &Value) -> RpcResult<Self> {
-        fn page<T: DeserializeOwned>(value: &Value) -> RpcResult<T> {
-            // Tagged events with arbitrary-precision extension numbers can require
-            // serde_json's text deserializer. Ordinary pages borrow the result tree.
-            T::deserialize(value)
-                .or_else(|_| serde_json::from_str(&value.to_string()))
-                .map_err(|_| RpcError::new(-32004, "Invalid guest result"))
-        }
+        // Decode from JSON text so extension numbers outside u64 retain their precision.
+        let text = value.to_string();
+        let invalid = |_| RpcError::new(-32004, "Invalid guest result");
         match encoding {
-            HistoryEncoding::Compatibility => page(value).map(Self::Compatibility),
+            HistoryEncoding::Compatibility => serde_json::from_str(&text)
+                .map(Self::Compatibility)
+                .map_err(invalid),
             HistoryEncoding::Attribution => {
-                let page: AttributionHistoryPage = page(value)?;
+                let page: AttributionHistoryPage = serde_json::from_str(&text).map_err(invalid)?;
                 page.validate_revisions()?;
                 Ok(Self::Attribution(page))
             }

@@ -9,7 +9,12 @@ use venera_debug_protocol::v1::{
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-pub const MIN_STORAGE_BYTES: u64 = 16384 + 8 * (2 * 4096 + 8);
+const WORKSPACE_RESERVE: u64 = 16384;
+const fn bytes_per_archive_page(page_size: u64) -> u64 {
+    // One database page plus its rollback-journal entry.
+    2 * page_size + 8
+}
+pub const MIN_STORAGE_BYTES: u64 = WORKSPACE_RESERVE + 8 * bytes_per_archive_page(4096);
 
 const EVENTS: &str = "CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, received_at TEXT NOT NULL, message TEXT NOT NULL, raw_message TEXT)";
 const DIAGNOSTIC: &str = "INSERT INTO events(received_at,message,raw_message) VALUES (?1,?2,?3)";
@@ -47,6 +52,7 @@ pub fn now() -> String {
 pub struct Store {
     db: Connection,
     pages: Option<u64>,
+    page_size: u64,
 }
 impl Store {
     pub fn open(path: &Path, max_bytes: impl Into<Option<u64>>) -> Result<Self> {
@@ -59,6 +65,13 @@ impl Store {
         let db = Connection::open(path)?;
         db.busy_timeout(std::time::Duration::from_secs(2))?;
         db.execute_batch("PRAGMA page_size=4096; PRAGMA auto_vacuum=FULL; PRAGMA journal_mode=TRUNCATE; PRAGMA synchronous=FULL;")?;
+        let page_size: u64 = db.query_row("PRAGMA page_size", [], |r| r.get(0))?;
+        let per_page = bytes_per_archive_page(page_size);
+        let minimum = WORKSPACE_RESERVE + 8 * per_page;
+        if max_bytes.is_some_and(|n| n < minimum) {
+            return Err(format!("this archive uses {page_size}-byte pages and requires a storage budget of at least {minimum} bytes").into());
+        }
+        let pages = max_bytes.map(|n| ((n - WORKSPACE_RESERVE) / per_page).min(0xfffffffe));
         db.execute_batch(EVENTS)?;
         let mode: String = db.query_row("PRAGMA journal_mode", [], |r| r.get(0))?;
         let synchronous: u32 = db.query_row("PRAGMA synchronous", [], |r| r.get(0))?;
@@ -79,8 +92,7 @@ impl Store {
         if auto != 1 {
             return Err("database requires FULL auto_vacuum".into());
         }
-        let pages = max_bytes.map(|n| ((n - 16384) / (2 * 4096 + 8)).min(0xfffffffe));
-        let store = Self { db, pages };
+        let store = Self { db, pages, page_size };
         let tx = rusqlite::Transaction::new_unchecked(
             &store.db,
             rusqlite::TransactionBehavior::Immediate,
@@ -161,11 +173,12 @@ impl Store {
         if let Err(error) = &result {
             if error.is::<HistoryCapacity>() {
                 let pages = self.pages.expect("explicit budget");
-                if (text.len() + raw.map_or(0, str::len)) as u64 > pages * 4096 {
+                if (text.len() + raw.map_or(0, str::len)) as u64 > pages * self.page_size {
                     return Err(DiagnosticCapacity.into());
                 }
                 let probe = Connection::open_in_memory()?;
-                probe.execute_batch("PRAGMA page_size=4096; PRAGMA auto_vacuum=FULL;")?;
+                probe.pragma_update(None, "page_size", self.page_size)?;
+                probe.execute_batch("PRAGMA auto_vacuum=FULL;")?;
                 probe.execute_batch(EVENTS)?;
                 Self::migrate_history(&probe)?;
                 probe.pragma_update(None, "max_page_count", pages)?;
@@ -739,6 +752,30 @@ mod tests {
             );
             reopened.append(&json!({"text":"reopened"})).unwrap();
         }
+    }
+
+    #[test]
+    fn existing_large_pages_use_a_byte_budget_and_preserve_history_on_rejection() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("large-pages.db");
+        let db = Connection::open(&path).unwrap();
+        db.execute_batch("PRAGMA page_size=16384; PRAGMA auto_vacuum=FULL; CREATE TABLE events(id INTEGER PRIMARY KEY,received_at TEXT NOT NULL,message TEXT NOT NULL); INSERT INTO events VALUES(1,'2026-11-10T00:00:00Z','{\"text\":\"legacy\"}');").unwrap();
+        drop(db);
+        let error = Store::open(&path, 81984).err().unwrap();
+        assert_eq!(error.to_string(), "this archive uses 16384-byte pages and requires a storage budget of at least 278592 bytes");
+
+        let store = Store::open(&path, 278592).unwrap();
+        let mut bytes = Vec::new();
+        export(&path, &mut bytes, &ExportRange::default()).unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap()["message"], json!({"text":"legacy"}));
+        for i in 0..40 {
+            store.append(&json!({"i":i,"text":"x".repeat(8192)})).unwrap();
+        }
+        assert!(std::fs::metadata(&path).unwrap().len() <= 278592);
+        bytes.clear();
+        export(&path, &mut bytes, &ExportRange::default()).unwrap();
+        let output = String::from_utf8(bytes).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(output.lines().last().unwrap()).unwrap()["message"]["i"], 39);
     }
 
     #[test]

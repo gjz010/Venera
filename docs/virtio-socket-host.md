@@ -23,7 +23,7 @@ The service defaults to guest port `49152`, and control socket `$XDG_RUNTIME_DIR
 
 The dashboard loads from `../share/venera/web` relative to the executable directory, or from `debug-channel/web/dist` for a source build (`nix develop -c scripts/build workbench`). Use `--assets DIR` to choose another frontend or `--no-web` for collection alone.
 
-The archive grows with the available filesystem space by default. Set `--max-bytes` to choose the total capacity budget for the history database and SQLite workspace, with a minimum of 81984 bytes. Transaction workspace is reserved within it, and history data uses the remaining capacity. History is evicted in batches starting with the oldest records, and database pages are reclaimed on commit. Archive reads adapt their page size to the available capacity and resume from committed progress. Connection status includes archive progress and diagnostic-write status.
+The archive grows with the available filesystem space by default. Set `--max-bytes` to choose the total capacity budget for the history database and SQLite workspace. The minimum is 81984 bytes for new archives; an existing archive with larger SQLite pages needs a correspondingly larger budget. Transaction workspace is reserved within it, and history data uses the remaining capacity. History is evicted in batches starting with the oldest records, and database pages are reclaimed on commit. Archive reads adapt their page size to the available capacity and resume from committed progress. Connection status includes archive progress and diagnostic-write status.
 
 ## User Service Deployment
 

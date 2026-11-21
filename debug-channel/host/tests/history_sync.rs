@@ -370,23 +370,38 @@ fn wait_for_capacity(dir: &Path, position: &str) {
 }
 
 #[test]
-fn compatibility_history_exports_received_extension_fields_after_ack() {
+fn history_exports_received_extension_fields_after_ack() {
+    for attribution in [false, true] {
+        check_extension_export(attribution);
+    }
+}
+
+fn check_extension_export(attribution: bool) {
     let dir = TempDir::new().unwrap();
     let listener = UnixListener::bind(dir.path().join("guest.sock")).unwrap();
     let service = Service::start(dir.path());
-    let mut guest = Guest::accept(&listener, "extensions", 1, 1);
+    let mut guest = Guest::negotiate(&listener, "extensions", 1, 1, 1, attribution);
     let read = first_read(&mut guest);
     let mut event = record("extensions", 1, "from guest");
     event["event"]["record"]["vendor_label"] = json!(["engine", 42]);
-    guest.page(&read, json!([event]), json!([]), 1);
+    // Inject the JSON number as it appears on the wire, independently of the host parser.
+    let mut wire = event.clone();
+    wire["event"]["record"]["counter"] = json!("WIRE_NUMBER");
+    let response = json!({"jsonrpc":"2.0","id":read["id"],"result":{
+        "range":guest.range(),"records":[wire],"missing":[],
+        "next":{"journal_id":"extensions","position":"1"}
+    }}).to_string().replace("\"WIRE_NUMBER\"", "18446744073709551617");
+    writeln!(guest.writer, "{response}").unwrap();
     guest.ack("1");
     drop(service);
     let out = Command::new(env!("CARGO_BIN_EXE_venera-debug-host"))
         .args(["export", "--database"]).arg(dir.path().join("history.db")).output().unwrap();
     assert!(out.status.success());
-    let records: Vec<Value> = String::from_utf8(out.stdout).unwrap().lines()
+    let mut records: Vec<Value> = String::from_utf8(out.stdout).unwrap().lines()
         .map(|line| serde_json::from_str::<Value>(line).unwrap()["message"].clone())
         .filter(|r| r["cursor"]["journal_id"] == "extensions").collect();
+    let counter = records[0]["event"]["record"].as_object_mut().unwrap().remove("counter").unwrap();
+    assert_eq!(counter.as_number().unwrap().to_string(), "18446744073709551617");
     assert_eq!(records, [event]);
 }
 

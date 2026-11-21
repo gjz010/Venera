@@ -307,9 +307,9 @@ fn session(
                 }
                 v1::Method::HistoryRead => {
                     let page = match client.history_encoding() {
-                        v1::HistoryEncoding::Attribution => serde_json::from_value(value.clone())?,
+                        v1::HistoryEncoding::Attribution => serde_json::from_str(&value.to_string())?,
                         v1::HistoryEncoding::Compatibility => {
-                            store::compatibility_page(serde_json::from_value(value.clone())?)
+                            store::compatibility_page(serde_json::from_str(&value.to_string())?)
                         }
                     };
                     consumer.attribution_page(&page).map_err(|e| e.message)?;

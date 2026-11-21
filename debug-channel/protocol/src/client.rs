@@ -99,7 +99,7 @@ pub fn validate_result(method: Method, value: &Value) -> RpcResult<()> {
         }
         Method::SystemInfoGet => serde_json::from_value::<SystemInfo>(value.clone()).is_ok(),
         Method::HistoryRange => serde_json::from_value::<HistoryRange>(value.clone()).is_ok(),
-        Method::HistoryRead => serde_json::from_value::<HistoryPage>(value.clone()).is_ok(),
+        Method::HistoryRead => serde_json::from_str::<HistoryPage>(&value.to_string()).is_ok(),
         Method::HistoryAck => serde_json::from_value::<HistoryAck>(value.clone()).is_ok(),
         _ => false,
     };
@@ -271,7 +271,7 @@ impl Client {
                             if method == Method::HistoryRead
                                 && self.history_encoding() == HistoryEncoding::Attribution
                             {
-                                serde_json::from_value::<AttributionHistoryPage>(value.clone())
+                                serde_json::from_str::<AttributionHistoryPage>(&value.to_string())
                                     .map_err(|_| RpcError::new(-32004, "Invalid guest result"))?
                                     .validate_revisions()?;
                             } else {

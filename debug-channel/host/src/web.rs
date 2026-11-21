@@ -200,8 +200,14 @@ async fn events(
              FROM events e LEFT JOIN events t ON t.journal_id=e.journal_id AND t.position=e.revision_target
              WHERE e.id>?1 AND e.id<=?2 AND (e.revision_target IS NULL OR t.id IS NOT NULL) ORDER BY e.id".into()
         } else {
-            let (condition, order) = if after.is_some() { ("id>?1", "ASC") } else { ("(?1 IS NULL OR id<?1)", "DESC") };
-            format!("SELECT id,id,received_at,message,{raw},0 FROM events WHERE {visible} AND {condition} AND id<=?2 ORDER BY id {order}")
+            let (condition, order) = if after.is_some() {
+                ("id>?1 AND id<=?2", "ASC")
+            } else if before.is_some() {
+                ("id<?1 AND id<=?2", "DESC")
+            } else {
+                ("id<=?2", "DESC")
+            };
+            format!("SELECT id,id,received_at,message,{raw},0 FROM events WHERE {visible} AND {condition} ORDER BY id {order}")
         };
         let mut statement = db.prepare(&sql).map_err(internal)?;
         let cursor = after.or(before);

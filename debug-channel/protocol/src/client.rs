@@ -1,5 +1,6 @@
 //! Connection-scoped RPC negotiation and history consumption.
 use crate::v1::*;
+use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
@@ -79,13 +80,17 @@ pub enum HistoryReply {
 
 impl HistoryReply {
     fn decode(encoding: HistoryEncoding, value: &Value) -> RpcResult<Self> {
-        // Decode from JSON text so extension numbers outside u64 retain their precision.
-        let text = value.to_string();
-        let invalid = |_| RpcError::new(-32004, "Invalid guest result");
+        fn page<T: DeserializeOwned>(value: &Value) -> RpcResult<T> {
+            // Tagged events with arbitrary-precision extension numbers can require
+            // serde_json's text deserializer. Ordinary pages borrow the result tree.
+            T::deserialize(value)
+                .or_else(|_| serde_json::from_str(&value.to_string()))
+                .map_err(|_| RpcError::new(-32004, "Invalid guest result"))
+        }
         match encoding {
-            HistoryEncoding::Compatibility => serde_json::from_str(&text).map(Self::Compatibility).map_err(invalid),
+            HistoryEncoding::Compatibility => page(value).map(Self::Compatibility),
             HistoryEncoding::Attribution => {
-                let page: AttributionHistoryPage = serde_json::from_str(&text).map_err(invalid)?;
+                let page: AttributionHistoryPage = page(value)?;
                 page.validate_revisions()?;
                 Ok(Self::Attribution(page))
             }
@@ -228,56 +233,18 @@ impl Client {
                     continue;
                 }
             };
-            let original: Option<Value> = serde_json::from_slice(frame.bytes()).ok();
-            let array = matches!(original, Some(Value::Array(_)));
-            let sources: Vec<String> = match &original {
-                Some(Value::Array(values)) if !values.is_empty() => {
-                    values.iter().map(Value::to_string).collect()
-                }
-                _ => vec![frame.text().to_owned()],
-            };
-            let mut accepted = Vec::new();
-            for source in &sources {
-                let value: Option<Value> = serde_json::from_str(source).ok();
-                let packet = RpcPacket::decode(source.as_bytes(), Receiver::Host);
-                let response_like = value.as_ref().is_some_and(|v| {
-                    v.get("method").is_none()
-                        && (v.get("result").is_some() || v.get("error").is_some())
-                });
-                if response_like
-                    && packet
-                        .items
-                        .iter()
-                        .any(|item| matches!(item, PacketItem::Rejected(_)))
-                {
-                    self.errors.push(json!("Invalid guest response"));
-                    continue;
-                }
-                for item in &packet.items {
-                    if let PacketItem::Request(request) = item {
-                        if matches!(
-                            request.incoming,
-                            Incoming::StatusChanged(_) | Incoming::Log(_) | Incoming::Gap(_)
-                        ) {
-                            self.events.push((request.incoming.clone(), source.clone()));
-                        }
+            let mut packet = RpcPacket::from_frame(frame.bytes(), |packet, mut value| {
+                let batch = packet.is_batch();
+                match packet.item(&mut value, Receiver::Host) {
+                    Ok(Some(request)) if matches!(request.incoming,
+                        Incoming::StatusChanged(_) | Incoming::Log(_) | Incoming::Gap(_)) => {
+                        let source = if batch { value.to_string() } else { frame.text().to_owned() };
+                        self.events.push((request.incoming.clone(), source));
                     }
+                    Err(_) => self.errors.push(json!("Invalid guest response")),
+                    _ => (),
                 }
-                accepted.push(source.as_str());
-            }
-            if accepted.is_empty() {
-                continue;
-            }
-            let filtered;
-            let bytes = if array
-                && matches!(original, Some(Value::Array(ref values)) if !values.is_empty())
-            {
-                filtered = format!("[{}]", accepted.join(","));
-                filtered.as_bytes()
-            } else {
-                frame.bytes()
-            };
-            let mut packet = RpcPacket::decode(bytes, Receiver::Host);
+            });
             for item in packet.items {
                 match item {
                     PacketItem::Response(response) => {

@@ -26,27 +26,37 @@ pub enum RpcResponse {
 impl<'de> Deserialize<'de> for RpcResponse {
     fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
         let value = Value::deserialize(de)?;
-        parse_response(&value).map_err(serde::de::Error::custom)
+        parse_response(value).map_err(serde::de::Error::custom)
     }
 }
-fn parse_response(value: &Value) -> Result<RpcResponse, &'static str> {
+fn parse_response(mut value: Value) -> Result<RpcResponse, &'static str> {
     if value["jsonrpc"] != "2.0" {
         return Err("expected JSON-RPC 2.0");
     }
-    let id = value.get("id").ok_or("expected response ID")?;
-    let id: RpcId = serde_json::from_value(id.clone()).map_err(|_| "invalid response ID")?;
-    match (value.get("result"), value.get("error")) {
+    let object = value.as_object_mut().ok_or("expected response object")?;
+    let id = object.remove("id").ok_or("expected response ID")?;
+    let id = rpc_id(id).ok_or("invalid response ID")?;
+    match (object.remove("result"), object.remove("error")) {
         (Some(result), None) => Ok(RpcResponse::Success {
             jsonrpc: Version::V2,
             id,
-            result: result.clone(),
+            result,
         }),
         (None, Some(error)) => Ok(RpcResponse::Error {
             jsonrpc: Version::V2,
             id,
-            error: serde_json::from_value(error.clone()).map_err(|_| "invalid error object")?,
+            error: serde_json::from_value(error).map_err(|_| "invalid error object")?,
         }),
         _ => Err("expected exactly one result or error"),
+    }
+}
+
+fn rpc_id(value: Value) -> Option<RpcId> {
+    match value {
+        Value::Null => Some(RpcId::Null),
+        Value::String(s) => Some(RpcId::String(s)),
+        Value::Number(n) => Some(RpcId::Number(n)),
+        _ => None,
     }
 }
 
@@ -208,6 +218,13 @@ pub struct RpcPacket {
 impl RpcPacket {
     /// Parses one JSONL payload, including inbound responses and batch requests.
     pub fn decode(bytes: &[u8], receiver: Receiver) -> Self {
+        Self::from_frame(bytes, |packet, mut value| {
+            if packet.item(&mut value, receiver).is_err() {
+                packet.invalid();
+            }
+        })
+    }
+    pub(crate) fn from_frame(bytes: &[u8], mut member: impl FnMut(&mut Self, Value)) -> Self {
         let mut packet = Self {
             items: Vec::new(),
             batch: RpcBatch {
@@ -226,10 +243,10 @@ impl RpcPacket {
             Some(Value::Array(values)) if !values.is_empty() => {
                 packet.batch.array = true;
                 for value in values {
-                    packet.item(value, receiver);
+                    member(&mut packet, value);
                 }
             }
-            Some(value) => packet.item(value, receiver),
+            Some(value) => member(&mut packet, value),
         }
         packet
     }
@@ -244,19 +261,21 @@ impl RpcPacket {
     fn invalid(&mut self) {
         self.reject(RpcId::Null, RpcError::new(-32600, "Invalid Request"));
     }
-    fn item(&mut self, value: Value, receiver: Receiver) {
+    pub(crate) fn is_batch(&self) -> bool {
+        self.batch.array
+    }
+    /// Retains the source value for requests. A malformed response has no response slot.
+    pub(crate) fn item(&mut self, value: &mut Value, receiver: Receiver) -> Result<Option<&RpcRequest>, &'static str> {
         let Some(object) = value.as_object() else {
             self.invalid();
-            return;
+            return Ok(None);
         };
         if !object.contains_key("method")
             && (object.contains_key("result") || object.contains_key("error"))
         {
-            match parse_response(&value) {
-                Ok(response) => self.items.push(PacketItem::Response(response)),
-                Err(_) => self.invalid(),
-            }
-            return;
+            let response = parse_response(value.take())?;
+            self.items.push(PacketItem::Response(response));
+            return Ok(None);
         }
         if value["jsonrpc"] != "2.0"
             || !value["method"].is_string()
@@ -264,15 +283,15 @@ impl RpcPacket {
             || object.contains_key("error")
         {
             self.invalid();
-            return;
+            return Ok(None);
         }
         let id = match object.get("id") {
             None => None,
-            Some(value) => match serde_json::from_value::<RpcId>(value.clone()) {
-                Ok(id) => Some(id),
-                Err(_) => {
+            Some(value) => match rpc_id(value.clone()) {
+                Some(id) => Some(id),
+                None => {
                     self.invalid();
-                    return;
+                    return Ok(None);
                 }
             },
         };
@@ -302,6 +321,9 @@ impl RpcPacket {
                     id,
                     correlation,
                 }));
+                if let Some(PacketItem::Request(request)) = self.items.last() {
+                    return Ok(Some(request));
+                }
             }
             Err(error) => {
                 if let Some(id) = id {
@@ -309,5 +331,6 @@ impl RpcPacket {
                 }
             }
         }
+        Ok(None)
     }
 }

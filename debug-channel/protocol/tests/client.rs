@@ -107,6 +107,30 @@ fn range(high_water: u64) -> HistoryRange {
         high_water: DecimalU64(high_water),
     }
 }
+
+#[test]
+fn single_event_retains_wire_text_and_batch_keeps_its_response_shape() {
+    let mut client = Client::default();
+    let event = r#"  { "method":"gap", "params":{"reason":"overflow","stream_id":"s"}, "jsonrpc":"2.0" } "#;
+    client.receive(format!("{event}\n").as_bytes()).unwrap();
+    let events = client.take_events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].1, event);
+    assert!(matches!(&events[0].0, Incoming::Gap(gap) if gap.reason == "overflow"));
+
+    let batch = format!(r#"[{event},{{"result":0}},{{"jsonrpc":"2.0","method":"endpoint.info","id":7}}]"#);
+    client.receive(format!("{batch}\n").as_bytes()).unwrap();
+    assert_eq!(client.take_errors(), [json!("Invalid guest response")]);
+    let events = client.take_events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(serde_json::from_str::<Value>(&events[0].1).unwrap()["method"], "gap");
+    let output = write(&mut client);
+    assert_eq!(output.len(), 1);
+    let responses = output[0].as_array().unwrap();
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0]["id"], 7);
+    assert_eq!(responses[0]["result"]["role"], "host");
+}
 fn page() -> HistoryPage {
     serde_json::from_value(json!({"range":{"journal_id":"j","oldest":"1","high_water":"8"},
         "records":[{"cursor":{"journal_id":"j","position":"7"},"boot_id":"boot","recorded_at_ms":"100","startup":false,

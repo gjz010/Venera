@@ -183,6 +183,48 @@ test('follows the entire first burst after opening an empty archive', async () =
   ).toEqual(burst.map((e) => `查看事件 ${e.id}`));
 });
 
+test('browses contiguous history while following a revision of an older row', async () => {
+  vi.useFakeTimers();
+  const row = (id: string) => ({ ...first, id });
+  vi.stubGlobal('fetch', async (input: string) => {
+    const p = new URL(input, 'http://localhost').searchParams;
+    const base = { oldest_id: '1', latest_id: '1000' };
+    if (p.has('before'))
+      return response({
+        ...base,
+        events: p.get('before') === '801' ? [row('601')] : [],
+      });
+    if (p.get('after') === '1000')
+      return response({
+        ...base,
+        events: [],
+        changes: [{ id: '42', event: row('42') }],
+        next_id: '1001',
+      });
+    if (p.get('after') === '1001')
+      return response({ ...base, events: [row('1002')], next_id: '1002' });
+    return response({ ...base, events: [row('801'), row('1000')] });
+  });
+  await act(async () => {
+    render(<App />);
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '加载更早' }));
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+  const history = screen.getByRole('region', { name: '事件历史' });
+  expect(
+    within(history)
+      .getAllByRole('button')
+      .map((el) => el.getAttribute('aria-label')),
+  ).toEqual(['42', '601', '801', '1000', '1002'].map((id) => `查看事件 ${id}`));
+});
+
 test('applies late attribution to the visible row and its open details', async () => {
   vi.useFakeTimers();
   const repaired = {

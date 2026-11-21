@@ -164,6 +164,7 @@ export function App() {
   const olderRequest = useRef(false);
   const requestBusy = useRef(false);
   const cursor = useRef<string | null>(null);
+  const before = useRef<string | null>(null);
   const rows = useRef<LogEvent[]>([]);
   const list = useRef<HTMLDivElement>(null);
   const [columnWidths, setColumnWidths] = useState([160, 170, 130, 80, 180]);
@@ -249,13 +250,13 @@ export function App() {
   function merge(batch: LogEvent[], older: boolean, oldest: string | null) {
     const ids = new Set(rows.current.map((event) => event.id));
     const fresh = batch.filter((event) => !ids.has(event.id));
-    const merged = older
-      ? [...fresh, ...rows.current]
-      : [...rows.current, ...fresh];
+    const merged = [...rows.current, ...fresh];
+    if (older) merged.sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
     if (merged.length > 5000) setTrimmed(true);
     rows.current = older ? merged.slice(0, 5000) : merged.slice(-5000);
     setEvents(rows.current);
-    const first = rows.current[0]?.id;
+    if (!older && merged.length > 5000) before.current = rows.current[0].id;
+    const first = before.current;
     setHasOlder(Boolean(first && oldest && BigInt(first) > BigInt(oldest)));
   }
   const mergeRef = useRef(merge);
@@ -270,6 +271,7 @@ export function App() {
     requestBusy.current = false;
     setOlderBusy(false);
     cursor.current = null;
+    before.current = null;
     rows.current = [];
     setEvents([]);
     setSelectedId(null);
@@ -291,6 +293,7 @@ export function App() {
           controller.signal,
         );
         if (generation !== epoch.current) return;
+        if (!ready) before.current = page.events[0]?.id ?? page.oldest_id;
         cursor.current =
           page.next_id ?? page.events.at(-1)?.id ?? page.latest_id ?? '0';
         if (page.changes?.length) {
@@ -358,7 +361,7 @@ export function App() {
   }, [selectedId]);
 
   async function loadOlder() {
-    const first = rows.current[0]?.id;
+    const first = before.current;
     if (!first || olderRequest.current || requestBusy.current) return;
     const generation = epoch.current;
     olderRequest.current = true;
@@ -370,9 +373,8 @@ export function App() {
     try {
       const page = await read<Page>(`/api/events?${search}`);
       if (generation !== epoch.current) return;
+      before.current = page.events[0]?.id ?? null;
       mergeRef.current(page.events, true, page.oldest_id);
-      cursor.current = rows.current.at(-1)?.id ?? cursor.current;
-      if (!page.events.length) setHasOlder(false);
       setError('');
     } catch (reason) {
       if (generation === epoch.current)

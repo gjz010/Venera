@@ -142,17 +142,21 @@ fn open(path: &std::path::Path) -> Result<Connection> {
     Ok(db)
 }
 
-fn visible(db: &Connection) -> Result<&'static str> {
-    let has_control = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('events') WHERE name='revision_target')",
+fn archive_schema(db: &Connection) -> Result<(&'static str, bool)> {
+    let (has_control, has_gaps) = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('events') WHERE name='revision_target'),
+                EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='history_missing')",
         [],
-        |row| row.get::<_, bool>(0),
+        |row| Ok((row.get::<_, bool>(0)?, row.get(1)?)),
     )?;
-    Ok(if has_control {
-        "revision_target IS NULL"
-    } else {
-        "1"
-    })
+    Ok((if has_control { "revision_target IS NULL" } else { "1" }, has_gaps))
+}
+
+fn gap_marker(has_gaps: bool) -> &'static str {
+    // Only synthetic journal rows can have a gap record.
+    if has_gaps {
+        "CASE WHEN e.journal_id IS NOT NULL AND e.position IS NULL THEN EXISTS(SELECT 1 FROM history_missing g WHERE g.id=e.id) ELSE 0 END"
+    } else { "0" }
 }
 fn event(id: i64, received: String, message: String, raw: Option<String>) -> Result<Value> {
     let value: Value = serde_json::from_str(&message)?;
@@ -186,20 +190,13 @@ async fn events(
         let mut conn = open(&path).map_err(internal)?;
         let db = conn.transaction().map_err(internal)?;
         let raw = if has_raw(&db).map_err(internal)? { "raw_message" } else { "NULL" };
-        let visible = visible(&db).map_err(internal)?;
+        let (visible, has_gaps) = archive_schema(&db).map_err(internal)?;
         let (oldest, latest): (Option<i64>, Option<i64>) = db.query_row(&format!(
             "SELECT (SELECT id FROM events WHERE {visible} ORDER BY id LIMIT 1),
                     (SELECT id FROM events WHERE {visible} ORDER BY id DESC LIMIT 1)"
         ), [], |r| Ok((r.get(0)?, r.get(1)?))).map_err(internal)?;
-        let (upper, has_gaps): (i64, bool) = db.query_row(
-            "SELECT COALESCE(MAX(id),0), EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='history_missing') FROM events",
-            [], |r| Ok((r.get(0)?, r.get(1)?)),
-        ).map_err(internal)?;
-        // Only synthetic journal rows can have a gap record. Check its primary key
-        // in the page scan, skipping the lookup for diagnostics and positioned rows.
-        let gap = if has_gaps {
-            "CASE WHEN e.journal_id IS NOT NULL AND e.position IS NULL THEN EXISTS(SELECT 1 FROM history_missing g WHERE g.id=e.id) ELSE 0 END"
-        } else { "0" };
+        let upper: i64 = db.query_row("SELECT COALESCE(MAX(id),0) FROM events", [], |r| r.get(0)).map_err(internal)?;
+        let gap = gap_marker(has_gaps);
         let sql = if after.is_some() && visible != "1" {
             // Each revision advances the scan at its own ID but delivers the current
             // projection at the original row ID, including rows leaving the filter.
@@ -262,20 +259,21 @@ async fn detail(
         } else {
             "NULL"
         };
-        let visible = visible(&db).map_err(internal)?;
-        let row: Option<(String, String, Option<String>)> = db
+        let (visible, has_gaps) = archive_schema(&db).map_err(internal)?;
+        let gap = gap_marker(has_gaps);
+        let row: Option<(String, String, Option<String>, bool)> = db
             .query_row(
-                &format!("SELECT received_at,message,{raw} FROM events WHERE id=?1 AND {visible}"),
+                &format!("SELECT received_at,message,{raw},{gap} FROM events e WHERE id=?1 AND {visible}"),
                 [id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .optional()
             .map_err(internal)?;
-        let (received, message, raw) =
+        let (received, message, raw, managed_gap) =
             row.ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "Event not found".into()))?;
-        event(id, received, message, raw)
-            .map(Json)
-            .map_err(internal)
+        let mut value = event(id, received, message, raw).map_err(internal)?;
+        if managed_gap { value["managed_gap"] = json!(true); }
+        Ok(Json(value))
     })
     .await
     .map_err(internal)?

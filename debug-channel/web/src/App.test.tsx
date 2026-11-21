@@ -302,6 +302,60 @@ test('returns to a contiguous live tail after filling the history window', async
   ).toEqual(rows(5002, 200).map((row) => `查看事件 ${row.id}`));
 }, 30000);
 
+test('clears a repaired gap from details after newer rows trim it from history', async () => {
+  vi.useFakeTimers();
+  const gap = { ...first, id: '1', managed_gap: true };
+  let finishDetail!: (reply: Response) => void;
+  const pendingDetail = new Promise<Response>((resolve) => {
+    finishDetail = resolve;
+  });
+  vi.stubGlobal('fetch', async (input: string) => {
+    const url = new URL(input, 'http://localhost');
+    if (url.pathname === '/api/events/1') return pendingDetail;
+    const after = Number(url.searchParams.get('after'));
+    if (!after) return page([gap]);
+    const latest = after < 5001 ? 5001 : 5002;
+    const events = Array.from(
+      { length: Math.min(200, latest - after) },
+      (_, i) => {
+        const id = after + i + 1;
+        return { ...first, id: String(id), managed_gap: id === 5001 };
+      },
+    );
+    const [lo, hi] = (url.searchParams.get('gap_window') ?? '')
+      .split(':')
+      .map(Number);
+    return response({
+      events,
+      oldest_id: '1',
+      latest_id: String(latest),
+      retained_gaps: (after < 5001 ? [1] : [5001])
+        .filter((id) => lo <= id && id <= hi)
+        .map(String),
+    });
+  });
+  await act(async () => {
+    render(<App />);
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '查看事件 1' }));
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(25000);
+  });
+  const history = screen.getByRole('region', { name: '事件历史' });
+  expect(history.firstElementChild).toHaveAttribute('aria-label', '查看事件 2');
+  expect(within(screen.getByRole('tabpanel')).getByText('1')).toBeVisible();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+  await act(async () => {
+    finishDetail(response(gap));
+  });
+  expect(history.querySelector('[aria-label="查看事件 5001"]')).toBeVisible();
+  expect(document.querySelector('[role="tabpanel"]')).toBeNull();
+}, 30000);
+
 test('keeps a diagnostic beside the remaining gaps when a missing range changes', async () => {
   vi.useFakeTimers();
   const gap = (id: string, start: string, end: string) => ({

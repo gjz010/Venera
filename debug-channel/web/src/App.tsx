@@ -155,10 +155,10 @@ export function App() {
   const [olderBusy, setOlderBusy] = useState(false);
   const [hasOlder, setHasOlder] = useState(false);
   const [trimmed, setTrimmed] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<LogEvent | null>(null);
-  const selectedRef = useRef(selectedId);
-  selectedRef.current = selectedId;
+  const selectedId = selected?.id;
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
   const detailVersion = useRef(0);
   const [detailError, setDetailError] = useState('');
   const epoch = useRef(0);
@@ -286,7 +286,6 @@ export function App() {
     before.current = null;
     rows.current = [];
     setEvents([]);
-    setSelectedId(null);
     setSelected(null);
     setTrimmed(false);
     setHasOlder(false);
@@ -299,7 +298,13 @@ export function App() {
       search.set('limit', '200');
       const after = cursor.current;
       if (after !== null) search.set('after', after);
-      const gaps = gapIds.current;
+      let gaps = gapIds.current;
+      const selection = selectedRef.current;
+      if (selection?.managed_gap && !gaps.includes(selection.id)) {
+        gaps = [...gaps, selection.id].sort((a, b) =>
+          BigInt(a) < BigInt(b) ? -1 : 1,
+        );
+      }
       if (after !== null && gaps.length)
         search.set('gap_window', `${gaps[0]}:${gaps.at(-1)}`);
       try {
@@ -328,11 +333,10 @@ export function App() {
           for (const { id, event } of changes) {
             if (event) visible.set(id, event);
             else visible.delete(id);
-            if (id === selectedRef.current) {
+            if (id === selectedRef.current?.id) {
               detailVersion.current++;
               setSelected(event);
               setDetailError('');
-              if (!event) setSelectedId(null);
             }
           }
           rows.current = Array.from(visible.values()).sort((a, b) =>
@@ -674,7 +678,6 @@ export function App() {
                         style={{ gridTemplateColumns: columnTemplate }}
                         onClick={() => {
                           setSelected(event);
-                          setSelectedId(event.id);
                           if (narrow) setDrawer('detail');
                         }}
                         aria-label={t('viewEvent', { id: event.id })}

@@ -180,6 +180,8 @@ fn following_reconciles_gap_ids_in_the_requested_window() {
     db.execute_batch("INSERT INTO events(id,received_at,message) SELECT 99,received_at,message FROM events WHERE id=100").unwrap();
     let page = server.json("/api/events");
     assert_eq!(page["next_id"], "101");
+    assert_eq!(server.json("/api/events/99"), page["events"][0]);
+    assert_eq!(server.json("/api/events/100"), page["events"][1]);
     for page in [page, server.json("/api/events?after=98"), server.json("/api/events?before=102")] {
         let rows = page["events"].as_array().unwrap();
         assert_eq!(rows[0]["id"], "99");

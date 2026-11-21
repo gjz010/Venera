@@ -251,7 +251,16 @@ export function App() {
     const fresh = batch.filter((event) => !ids.has(event.id));
     const merged = [...rows.current, ...fresh];
     if (older) merged.sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
-    if (merged.length > 5000) setTrimmed(true);
+    if (merged.length > 5000) {
+      setTrimmed(true);
+      if (older) {
+        // The newest displayed rows are leaving the history window. Resume
+        // following from a fresh tail page, with its own matching scan cursor.
+        cursor.current = null;
+        follow.current = false;
+        setFollowing(false);
+      }
+    }
     rows.current = older ? merged.slice(0, 5000) : merged.slice(-5000);
     setEvents(rows.current);
     if (!older && merged.length > 5000) before.current = rows.current[0].id;
@@ -264,7 +273,6 @@ export function App() {
   useEffect(() => {
     const generation = ++epoch.current;
     const controller = new AbortController();
-    let ready = false;
     requestBusy.current = false;
     setOlderBusy(false);
     cursor.current = null;
@@ -282,14 +290,19 @@ export function App() {
       requestBusy.current = true;
       const search = new URLSearchParams(params);
       search.set('limit', '200');
-      if (ready && cursor.current) search.set('after', cursor.current);
+      const after = cursor.current;
+      if (after !== null) search.set('after', after);
       try {
         const page = await read<Page>(
           `/api/events?${search}`,
           controller.signal,
         );
         if (generation !== epoch.current) return;
-        if (!ready) before.current = page.events[0]?.id ?? page.oldest_id;
+        if (after === null) {
+          before.current = page.events[0]?.id ?? page.oldest_id;
+          rows.current = [];
+          setTrimmed(false);
+        }
         cursor.current =
           page.next_id ?? page.events.at(-1)?.id ?? page.latest_id ?? '0';
         if (page.changes?.length) {
@@ -311,7 +324,6 @@ export function App() {
           );
           mergeRef.current([], false, page.oldest_id);
         } else mergeRef.current(page.events, false, page.oldest_id);
-        ready = true;
         setError('');
       } catch (reason) {
         if (!controller.signal.aborted && generation === epoch.current)

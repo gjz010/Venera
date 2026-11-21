@@ -225,6 +225,55 @@ test('browses contiguous history while following a revision of an older row', as
   ).toEqual(['42', '601', '801', '1000', '1002'].map((id) => `查看事件 ${id}`));
 });
 
+test('returns to a contiguous live tail after filling the history window', async () => {
+  vi.useFakeTimers();
+  const rows = (start: number, count: number) =>
+    Array.from({ length: count }, (_, i) => ({
+      ...first,
+      id: String(start + i),
+    }));
+  let latest = 400;
+  vi.stubGlobal('fetch', async (input: string) => {
+    const p = new URL(input, 'http://localhost').searchParams;
+    const after = Number(p.get('after'));
+    const events = after
+      ? rows(after + 1, Math.min(200, latest - after))
+      : rows(Number(p.get('before') ?? latest + 1) - 200, 200);
+    return response({
+      events,
+      oldest_id: '1',
+      latest_id: String(latest),
+      next_id: events.at(-1)?.id ?? String(latest),
+    });
+  });
+  await act(async () => {
+    render(<App />);
+  });
+  const older = screen.getByRole('button', { name: '加载更早' });
+  const follow = screen.getByRole('switch', { name: '实时跟随' });
+  const history = screen.getByRole('region', { name: '事件历史' });
+  latest = 5200;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(24000);
+  });
+  await act(async () => {
+    fireEvent.click(older);
+  });
+  expect(history.lastElementChild).toHaveAttribute(
+    'aria-label',
+    '查看事件 5000',
+  );
+  expect(follow).not.toBeChecked();
+  latest = 5201;
+  await act(async () => {
+    fireEvent.click(follow);
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+  expect(
+    Array.from(history.children, (el) => el.getAttribute('aria-label')),
+  ).toEqual(rows(5002, 200).map((row) => `查看事件 ${row.id}`));
+}, 30000);
+
 test('applies late attribution to the visible row and its open details', async () => {
   vi.useFakeTimers();
   const repaired = {

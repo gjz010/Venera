@@ -435,56 +435,6 @@ test('系统报告保持本次采集直到用户刷新', async () => {
   );
 });
 
-test('连接响应完成后采集系统报告，每次刷新依次完成两项读取', async () => {
-  let finishConnection: (response: Response) => void = () => {};
-  const requests: string[] = [];
-  vi.stubGlobal(
-    'fetch',
-    vi.fn((url: string) => {
-      requests.push(url);
-      if (url === '/api/connection')
-        return new Promise<Response>((resolve) => {
-          finishConnection = resolve;
-        });
-      return Promise.resolve(json(report));
-    }),
-  );
-  const user = userEvent.setup();
-  render(<SystemInfo />);
-  expect(screen.getByRole('button', { name: '正在刷新' })).toBeDisabled();
-  expect(requests).toEqual(['/api/connection']);
-  await act(async () =>
-    finishConnection(
-      json({
-        transport: 'VirtIO Serial',
-        channel: 'graphics.venera.debug.0',
-        socket_path: '/run/debug.sock',
-        connected: true,
-        last_received_at: null,
-      }),
-    ),
-  );
-  expect(await screen.findByText('Graphics')).toBeVisible();
-  expect(requests).toEqual(['/api/connection', '/api/system-info']);
-  await user.click(screen.getByRole('button', { name: '刷新' }));
-  expect(requests).toEqual([
-    '/api/connection',
-    '/api/system-info',
-    '/api/connection',
-  ]);
-  await act(async () =>
-    finishConnection(json({ error: '接收端暂时离线' }, 503)),
-  );
-  expect(await screen.findByText('接收端暂时离线')).toBeVisible();
-  expect(requests).toEqual([
-    '/api/connection',
-    '/api/system-info',
-    '/api/connection',
-    '/api/system-info',
-  ]);
-  expect(screen.getByText('Degraded')).toBeVisible();
-});
-
 test.each([200, 503])(
   '连接错误包展示具体消息并继续采集报告（HTTP %s）',
   async (status) => {

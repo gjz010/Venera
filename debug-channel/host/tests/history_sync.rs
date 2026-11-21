@@ -370,6 +370,27 @@ fn wait_for_capacity(dir: &Path, position: &str) {
 }
 
 #[test]
+fn compatibility_history_exports_received_extension_fields_after_ack() {
+    let dir = TempDir::new().unwrap();
+    let listener = UnixListener::bind(dir.path().join("guest.sock")).unwrap();
+    let service = Service::start(dir.path());
+    let mut guest = Guest::accept(&listener, "extensions", 1, 1);
+    let read = first_read(&mut guest);
+    let mut event = record("extensions", 1, "from guest");
+    event["event"]["record"]["vendor_label"] = json!(["engine", 42]);
+    guest.page(&read, json!([event]), json!([]), 1);
+    guest.ack("1");
+    drop(service);
+    let out = Command::new(env!("CARGO_BIN_EXE_venera-debug-host"))
+        .args(["export", "--database"]).arg(dir.path().join("history.db")).output().unwrap();
+    assert!(out.status.success());
+    let records: Vec<Value> = String::from_utf8(out.stdout).unwrap().lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap()["message"].clone())
+        .filter(|r| r["cursor"]["journal_id"] == "extensions").collect();
+    assert_eq!(records, [event]);
+}
+
+#[test]
 fn archive_reduces_pages_to_capacity_and_acknowledges_committed_prefixes() {
     let dir = TempDir::new().unwrap();
     let listener = UnixListener::bind(dir.path().join("guest.sock")).unwrap();
@@ -897,6 +918,7 @@ fn negotiated_attribution_survives_independent_archive_progress() {
     let warm_listener = UnixListener::bind(warm.path().join("guest.sock")).unwrap();
     let cold_listener = UnixListener::bind(cold.path().join("guest.sock")).unwrap();
     let mut a_log = record("reused-pid", 1, "before PID reuse");
+    a_log["event"]["record"]["vendor_label"] = json!({"name":"keep-me"});
     a_log["event"]["record"]["process"] = json!({"pid":42});
     a_log["event"]["record"]["source_time"] = json!("2026-11-10T08:00:00.1234567Z");
     let mut b_log = record("reused-pid", 2, "after PID reuse");
@@ -1019,6 +1041,7 @@ fn negotiated_attribution_survives_independent_archive_progress() {
     assert_eq!(status, 200);
     let raw = messages(&body);
     assert_eq!(raw.len(), 1);
+    assert_eq!(raw[0]["event"]["record"]["vendor_label"], json!({"name":"keep-me"}));
     assert_eq!(raw[0]["event"]["record"]["process"]["pid"], 42);
     assert!(raw[0]["event"]["record"]["process"]["start_time_filetime"].is_null());
     assert_eq!(

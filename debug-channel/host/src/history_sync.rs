@@ -230,6 +230,8 @@ fn session(
     let mut next = v1::Method::HistoryRange;
     let mut ack = None;
     let mut pages = Vec::new();
+    // Capacity retries may split the current response into several committed pages.
+    let mut originals = std::collections::BTreeMap::new();
     let mut next_poll = Instant::now();
     *status.lock().unwrap() = json!({"state":"negotiating","cursor":consumer.cursor()});
     while !stop.load(std::sync::atomic::Ordering::Acquire) {
@@ -242,7 +244,7 @@ fn session(
         if pending.is_none() && Instant::now() >= next_poll && client.require(next).is_ok() {
             if next == v1::Method::HistoryRead && !pages.is_empty() {
                 let mut page = pages.pop().unwrap();
-                match store.append_attribution_page(&page) {
+                match store.append_received_page(&page, Some(&originals)) {
                     Ok(_) => {
                         // The shared checkpoint can be ahead of this reader's prefix.
                         consumer.attribution_page(&page).map_err(|e| e.message)?;
@@ -305,12 +307,22 @@ fn session(
                 }
                 v1::Method::HistoryRead => {
                     let page = match client.history_encoding() {
-                        v1::HistoryEncoding::Attribution => serde_json::from_value(value)?,
+                        v1::HistoryEncoding::Attribution => serde_json::from_value(value.clone())?,
                         v1::HistoryEncoding::Compatibility => {
-                            store::compatibility_page(serde_json::from_value(value)?)
+                            store::compatibility_page(serde_json::from_value(value.clone())?)
                         }
                     };
                     consumer.attribution_page(&page).map_err(|e| e.message)?;
+                    originals.clear();
+                    let mut value = value;
+                    let received = value["records"].as_array_mut().ok_or("missing history records")?;
+                    for (entry, raw) in page.records.iter().zip(received) {
+                        let position = entry.cursor.position.0;
+                        if originals.get(&position).is_some_and(|previous| previous != raw) {
+                            return Err("conflicting source records at the same position".into());
+                        }
+                        originals.insert(position, raw.take());
+                    }
                     pages.push(page);
                 }
                 v1::Method::HistoryAck => {

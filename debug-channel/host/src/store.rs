@@ -204,9 +204,17 @@ impl Store {
     }
 
     pub fn append_attribution_page(&self, page: &AttributionHistoryPage) -> Result<HistoryCursor> {
+        self.append_received_page(page, None)
+    }
+
+    pub(super) fn append_received_page(
+        &self,
+        page: &AttributionHistoryPage,
+        originals: Option<&std::collections::BTreeMap<u64, Value>>,
+    ) -> Result<HistoryCursor> {
         page.validate_revisions().map_err(|error| error.message)?;
         validate_history_page(page)?;
-        self.with_eviction(|tx, count| self.history_transaction(tx, page, count))
+        self.with_eviction(|tx, count| self.history_transaction(tx, page, count, originals))
     }
 
     fn with_eviction<T>(&self, mut write: impl FnMut(&Connection, i64) -> Result<T>) -> Result<T> {
@@ -247,6 +255,7 @@ impl Store {
         tx: &Connection,
         page: &AttributionHistoryPage,
         evict_count: i64,
+        originals: Option<&std::collections::BTreeMap<u64, Value>>,
     ) -> Result<HistoryCursor> {
         let journal = &page.range.journal_id;
         let current = self.history_cursor(journal)?.map_or(0, |c| c.position.0);
@@ -276,7 +285,12 @@ impl Store {
         let mut rows = std::collections::BTreeMap::new();
         for record in &page.records {
             let position = record.cursor.position.to_string();
-            let raw = serde_json::to_string(record)?;
+            let raw = match originals {
+                Some(rows) => serde_json::to_string(
+                    rows.get(&record.cursor.position.0).ok_or("missing source record")?,
+                )?,
+                None => serde_json::to_string(record)?,
+            };
             let saved: Option<String> = tx
                 .query_row(
                     "SELECT raw_message FROM events WHERE journal_id=?1 AND position=?2",
@@ -284,10 +298,16 @@ impl Store {
                     |r| r.get(0),
                 )
                 .optional()?;
-            if saved.as_ref().is_some_and(|saved| saved != &raw)
-                || rows
-                    .insert(position, raw.clone())
-                    .is_some_and(|previous| previous != raw)
+            if let Some(saved) = saved {
+                if saved != raw
+                    && serde_json::from_str::<Value>(&saved)? != serde_json::from_str::<Value>(&raw)?
+                {
+                    return Err("history record conflicts with its stored identity".into());
+                }
+            }
+            if rows
+                .insert(position, raw.clone())
+                .is_some_and(|previous| previous != raw)
             {
                 return Err("history record conflicts with its stored identity".into());
             }

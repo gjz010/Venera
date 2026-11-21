@@ -194,13 +194,11 @@ struct Wizard::Impl {
         const bool collector = SendMessageW(component_boxes[2], BM_GETCHECK, 0, 0) == BST_CHECKED;
         const bool panel = SendMessageW(component_boxes[1], BM_GETCHECK, 0, 0) == BST_CHECKED;
         const bool transport = SendMessageW(component_boxes[3], BM_GETCHECK, 0, 0) == BST_CHECKED;
-        const wchar_t* error = collector && !panel ? L"Select Panel for Debug collector." :
-            transport && !transport_available && !transport_ready ?
-            L"The VirtIO socket package is unavailable." :
-            collector && !transport && !transport_ready ? L"Select VirtIO socket transport for Debug collector." : L"";
-        SetWindowTextW(status, *error ? error : L"Ready.");
+        const auto error = components::selection_error({true, panel, collector, transport}, transport_available, transport_ready);
+        const std::wstring message(error.begin(), error.end());
+        SetWindowTextW(status, error.empty() ? L"Ready." : message.c_str());
         if (!buttons.empty())
-            EnableWindow(buttons.front(), !*error);
+            EnableWindow(buttons.front(), error.empty());
     }
 
     HWND child(const wchar_t* cls, DWORD style, DWORD ex, int id)

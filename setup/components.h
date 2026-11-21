@@ -70,18 +70,24 @@ struct Plan {
     std::string error;
 };
 
+inline std::string selection_error(Selection selected, bool transport_available, bool transport_ready)
+{
+    if (!selected.graphics)
+        return "Select Graphics to install Venera.";
+    if (selected.collector && !selected.panel)
+        return "Select Panel for Debug collector.";
+    if (selected.transport && !transport_available && !transport_ready)
+        return "The VirtIO socket package is unavailable.";
+    if (selected.collector && !selected.transport && !transport_ready)
+        return "Select VirtIO socket transport for Debug collector.";
+    return {};
+}
+
 inline Plan plan(const Observed& state, Action action, Selection selected)
 {
     Plan p;
     p.selected = selected;
-    if (!selected.graphics)
-        p.error = "Select Graphics to install Venera.";
-    else if (selected.collector && !selected.panel)
-        p.error = "Select Panel for Debug collector.";
-    else if (selected.transport && !state.transport_available && !state.transport_ready)
-        p.error = "The VirtIO socket package is unavailable.";
-    else if (selected.collector && !selected.transport && !state.transport_ready)
-        p.error = "Select VirtIO socket transport for Debug collector.";
+    p.error = selection_error(selected, state.transport_available, state.transport_ready);
     if (!p.error.empty())
         return p;
     p.graphics = action != Action::Modify || !state.graphics || state.collector_coupled;

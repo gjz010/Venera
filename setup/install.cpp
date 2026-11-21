@@ -1033,7 +1033,7 @@ bool install(const SystemState& state, const std::wstring& version, const Progre
     if (plan.transport_install) {
         progress(15, L"Installing the VirtIO socket package");
         pending_reboot |= add_viosock(dir);
-        recorded = components::completed(recorded, plan.selected, false, false, true);
+        recorded.transport = plan.selected.transport;
         save_selection();
     }
     std::wstring collector;
@@ -1085,7 +1085,7 @@ bool install(const SystemState& state, const std::wstring& version, const Progre
             delete_file(install_dir() + L"\\" + name + L".new", true);
         }
     }
-    recorded = components::completed(recorded, plan.selected, true, false, false);
+    recorded.panel = plan.selected.panel;
     save_selection();
     if (plan.selected.collector && (plan.collector_install || plan.transport_install)) {
         progress(90, L"Installing the debug collector");
@@ -1153,7 +1153,8 @@ bool install(const SystemState& state, const std::wstring& version, const Progre
         stop_debug_service(true);
         configure_capture(false);
     }
-    recorded = components::completed(recorded, plan.selected, false, true, true);
+    recorded.collector = plan.selected.collector;
+    recorded.transport = plan.selected.transport;
     save_selection();
     if (plan.graphics) {
         progress(95, L"Preparing the graphics driver for the next restart");

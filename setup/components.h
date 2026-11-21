@@ -100,16 +100,4 @@ inline Plan plan(const Observed& state, Action action, Selection selected)
     return p;
 }
 
-// A completed component records its requested state after servicing succeeds.
-inline Selection completed(Selection recorded, Selection requested, bool panel, bool collector, bool transport)
-{
-    if (panel)
-        recorded.panel = requested.panel;
-    if (collector)
-        recorded.collector = requested.collector;
-    if (transport)
-        recorded.transport = requested.transport;
-    return recorded;
-}
-
 } // namespace components

@@ -59,10 +59,6 @@ int main()
         check(p.error == "Select Panel for Debug collector.", "collector panel dependency");
     }
 
-    check(completed({true, true, false, false}, {true, false, true, true}, true, false, true) ==
-                    Selection{true, false, false, true}, "partial completion selection");
-    check(completed({true, true, false, false}, {true, false, true, true}, true, true, true) ==
-                    Selection{true, false, true, true}, "completed selection");
     p = plan(clean, Action::Modify, {false, true, false, false});
     check(p.error == "Select Graphics to install Venera.", "graphics selection");
 }

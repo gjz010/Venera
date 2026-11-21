@@ -182,7 +182,10 @@ async fn events(
         let db = conn.transaction().map_err(internal)?;
         let raw = if has_raw(&db).map_err(internal)? { "raw_message" } else { "NULL" };
         let visible = visible(&db).map_err(internal)?;
-        let (oldest, latest): (Option<i64>, Option<i64>) = db.query_row(&format!("SELECT MIN(id),MAX(id) FROM events WHERE {visible}"), [], |r| Ok((r.get(0)?, r.get(1)?))).map_err(internal)?;
+        let (oldest, latest): (Option<i64>, Option<i64>) = db.query_row(&format!(
+            "SELECT (SELECT id FROM events WHERE {visible} ORDER BY id LIMIT 1),
+                    (SELECT id FROM events WHERE {visible} ORDER BY id DESC LIMIT 1)"
+        ), [], |r| Ok((r.get(0)?, r.get(1)?))).map_err(internal)?;
         let upper: i64 = db.query_row("SELECT COALESCE(MAX(id),0) FROM events", [], |r| r.get(0)).map_err(internal)?;
         let sql = if after.is_some() && visible != "1" {
             // Each revision advances the scan at its own ID but delivers the current

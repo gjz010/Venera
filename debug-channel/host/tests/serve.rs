@@ -1014,16 +1014,18 @@ fn negotiation_blocks_calls_immediately_and_preserves_bootstrap_error() {
 }
 
 #[test]
-fn negotiation_timeout_is_visible_to_immediate_control_queries() {
+fn negotiation_timeout_reconnects_and_restores_status_queries() {
     let mut s = Session::connecting();
-    sleep(Duration::from_millis(5200));
-    let before = Instant::now();
-    assert_eq!(
-        s.query("system.info.get")["error"]["message"],
-        "Handshake timed out"
-    );
-    assert!(before.elapsed() < Duration::from_secs(1));
-    s.barrier();
+    assert_eq!(s.reader.read(&mut [0]).unwrap(), 0);
+    let mut guest = accept(&s.listener);
+    let mut reader = BufReader::new(guest.try_clone().unwrap());
+    bootstrap(&mut guest, &mut reader);
+    let initial = read_request(&mut reader, "status.get");
+    send(&mut guest, result(initial["id"].as_str().unwrap(), status()));
+    let mut local = control(s.dir.path(), "restored", "status.get", json!({}));
+    let request = read_request(&mut reader, "status.get");
+    send(&mut guest, result(request["id"].as_str().unwrap(), status()));
+    assert_eq!(read_message(&mut local), result("restored", status()));
 }
 
 #[test]

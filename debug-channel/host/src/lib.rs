@@ -645,6 +645,7 @@ fn collect(
                     )?;
                 }
             }
+            let mut disconnected = false;
             if guest.is_some() && !status_sent && client.negotiation().failure.is_none() {
                 if client.peer().endpoint().is_some() && client.peer().discovery().is_some() {
                     status_sent = true;
@@ -655,6 +656,7 @@ fn collect(
                     }
                 } else if client.negotiation().since.elapsed() > Duration::from_secs(5) {
                     client.fail(v1::RpcError::new(-32001, "Handshake timed out"));
+                    disconnected = true;
                 }
             }
             for _ in 0..16 {
@@ -693,8 +695,7 @@ fn collect(
                     }
                 }
             }
-            let mut disconnected = false;
-            if let Some(stream) = guest.as_mut() {
+            if let Some(stream) = guest.as_mut().filter(|_| !disconnected) {
                 if client.write(stream.as_mut()).is_err() {
                     disconnected = true;
                 }

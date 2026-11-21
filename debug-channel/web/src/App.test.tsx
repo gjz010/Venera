@@ -381,6 +381,7 @@ test('retries reconciliation from the displayed cursor and keeps surviving rows'
     managed_gap: true,
     message: {
       type: 'gap',
+      component: 'renderer',
       reason: 'retention_expired',
       first_position: start,
       last_position: end,
@@ -405,7 +406,9 @@ test('retries reconciliation from the displayed cursor and keeps surviving rows'
     requests.push({ url: input, init });
     if (url.pathname === '/api/events')
       return response({
-        events: busy ? [gap('5', '1', '1')] : [],
+        events: busy
+          ? [{ ...first, id: '5', message: { component: 'network' } }]
+          : [],
         next_id: busy ? '5' : after,
         oldest_id: '1',
         latest_id: after,
@@ -415,7 +418,13 @@ test('retries reconciliation from the displayed cursor and keeps surviving rows'
         status: 503,
       });
     return response({
-      events: [gap('6', '4', '6')],
+      events:
+        url.searchParams.get('component') === 'renderer'
+          ? [gap('6', '4', '6')]
+          : [
+              gap('6', '4', '6'),
+              { ...first, id: '5', message: { component: 'network' } },
+            ],
       changes: [{ id: '1', event: { ...first, id: '1' } }],
       removed_gaps: ['2'],
       next_id: '7',
@@ -425,6 +434,13 @@ test('retries reconciliation from the displayed cursor and keeps surviving rows'
   });
   await act(async () => {
     render(<App />);
+  });
+  fireEvent.click(screen.getByRole('button', { name: '筛选' }));
+  fireEvent.change(screen.getByLabelText('组件'), {
+    target: { value: 'renderer' },
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '应用筛选' }));
   });
   expect(screen.getByRole('button', { name: '查看事件 1' })).toBeVisible();
   await act(async () => {
@@ -460,7 +476,7 @@ test('retries reconciliation from the displayed cursor and keeps surviving rows'
     ]),
   ).toEqual(
     Array(2).fill([
-      '/api/events/follow?limit=200&after=3',
+      '/api/events/follow?component=renderer&limit=200&after=3',
       'application/json',
       { gap_ids: ['2', '3'] },
     ]),

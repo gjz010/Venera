@@ -298,37 +298,37 @@ export function App() {
       search.set('limit', '200');
       const after = cursor.current;
       if (after !== null) search.set('after', after);
-      if (
-        after !== null &&
-        (gapIds.current.length || selectedRef.current?.managed_gap)
-      )
-        search.set('limit', '1');
       const { signal } = controller;
       try {
-        let page = await read<Page>(`/api/events?${search}`, { signal });
-        if (signal.aborted || generation !== epoch.current) return;
+        let page: Page;
         if (
           after !== null &&
-          page.next_id &&
-          BigInt(page.next_id) > BigInt(after)
+          (gapIds.current.length || selectedRef.current?.managed_gap)
         ) {
+          const probe = new URLSearchParams({ limit: '1', after });
+          const progress = await read<Page>(`/api/events?${probe}`, { signal });
+          if (signal.aborted || generation !== epoch.current) return;
+          if (!progress.next_id || BigInt(progress.next_id) <= BigInt(after)) {
+            updateOlder(progress.oldest_id);
+            setError('');
+            return;
+          }
           const gaps = gapIds.current;
           const selection = selectedRef.current;
-          if (gaps.length || selection?.managed_gap) {
-            const ids =
-              selection?.managed_gap && !gaps.includes(selection.id)
-                ? [...gaps, selection.id]
-                : gaps;
-            search.set('limit', '200');
-            page = await read<Page>(`/api/events/follow?${search}`, {
-              signal,
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ gap_ids: ids }),
-            });
-            if (signal.aborted || generation !== epoch.current) return;
-          }
+          const ids =
+            selection?.managed_gap && !gaps.includes(selection.id)
+              ? [...gaps, selection.id]
+              : gaps;
+          page = await read<Page>(`/api/events/follow?${search}`, {
+            signal,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ gap_ids: ids }),
+          });
+        } else {
+          page = await read<Page>(`/api/events?${search}`, { signal });
         }
+        if (signal.aborted || generation !== epoch.current) return;
         if (after === null) {
           const selection = selectedRef.current;
           if (selection?.managed_gap) {

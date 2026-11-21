@@ -203,17 +203,11 @@ int run_install(const Options& opts)
         fail(L"To modify or repair Venera, use the installed setup in Apps & features. "
              L"To change versions, run the matching installation or update task.", ERROR_PRODUCT_VERSION);
     auto selected = opts.has_components ? opts.selected : components::current_selection(s.components);
-    auto validate = [&] {
-        auto plan = components::plan(s.components, action, selected);
-        if (!plan.error.empty())
-            fail(std::wstring(plan.error.begin(), plan.error.end()), ERROR_INVALID_PARAMETER);
-        return plan;
-    };
-    if (opts.silent)
-        validate();
     if (wizard && !confirm_install(s, selected, action))
         return kCancelled;
-    const auto plan = validate();
+    const auto plan = components::plan(s.components, action, selected);
+    if (!plan.error.empty())
+        fail(std::wstring(plan.error.begin(), plan.error.end()), ERROR_INVALID_PARAMETER);
     if (!plan.graphics)
         return run_work(L"Modifying Venera", [&s, plan](const Progress& p) { return install(s, version, p, plan); },
                         L"Venera components are configured");

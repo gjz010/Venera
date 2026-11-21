@@ -95,7 +95,7 @@ inline Plan plan(const Observed& state, Action action, Selection selected)
                           (action != Action::Modify || !state.transport_ready);
     p.panel_install = selected.panel && (action != Action::Modify || !state.panel);
     p.panel_remove = !selected.panel && state.panel;
-    p.collector_install = selected.collector && (p.graphics || action != Action::Modify || !state.collector);
+    p.collector_install = selected.collector && (p.graphics || !state.collector);
     p.collector_remove = !selected.collector && state.collector;
     return p;
 }

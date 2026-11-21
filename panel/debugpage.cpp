@@ -78,7 +78,7 @@ INT_PTR CALLBACK filterProc(HWND window,UINT msg,WPARAM wp,LPARAM lp) {
         for(const wchar_t* s:{locale::text(IDS_CurrentPrograms),locale::text(IDS_AllPrograms),locale::text(IDS_ProcessDescendants),locale::text(IDS_ExecutablePath)})
             SendDlgItemMessageW(window,503,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(s));
         SendDlgItemMessageW(window,503,CB_SETCURSEL,0,0);
-        for(const wchar_t* s:{locale::text(IDS_All),L"venera_d3d11",L"venera_d3d12",L"mesa",L"venus",L"dxvk",L"vkd3d",L"vkd3d-shader",L"kernel",L"service"})
+        for(const wchar_t* s:{locale::text(IDS_All),L"venera_d3d11",L"venera_d3d12",L"mesa",L"venus",L"dxvk",L"vkd3d-proton",L"kernel",L"service"})
             SendDlgItemMessageW(window,501,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(s));
         for(const wchar_t* s:{locale::text(IDS_All),L"trace",L"debug",L"info",L"warning",L"error",L"fatal",L"unknown"})
             SendDlgItemMessageW(window,502,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(s));

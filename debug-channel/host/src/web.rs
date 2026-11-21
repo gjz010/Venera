@@ -1,4 +1,4 @@
-use crate::store::{ExportRange, Result, export_message, has_raw};
+use crate::store::{ExportRange, Result, export_message};
 use axum::{
     Json, Router,
     body::{Body, Bytes},
@@ -142,22 +142,9 @@ fn open(path: &std::path::Path) -> Result<Connection> {
     Ok(db)
 }
 
-fn archive_schema(db: &Connection) -> Result<(&'static str, bool)> {
-    let (has_control, has_gaps) = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('events') WHERE name='revision_target'),
-                EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='history_missing')",
-        [],
-        |row| Ok((row.get::<_, bool>(0)?, row.get(1)?)),
-    )?;
-    Ok((if has_control { "revision_target IS NULL" } else { "1" }, has_gaps))
-}
+// Only synthetic journal rows can have a gap record.
+const GAP_MARKER: &str = "CASE WHEN e.journal_id IS NOT NULL AND e.position IS NULL THEN EXISTS(SELECT 1 FROM history_missing g WHERE g.id=e.id) ELSE 0 END";
 
-fn gap_marker(has_gaps: bool) -> &'static str {
-    // Only synthetic journal rows can have a gap record.
-    if has_gaps {
-        "CASE WHEN e.journal_id IS NOT NULL AND e.position IS NULL THEN EXISTS(SELECT 1 FROM history_missing g WHERE g.id=e.id) ELSE 0 END"
-    } else { "0" }
-}
 fn event(id: i64, received: String, message: String, raw: Option<String>) -> Result<Value> {
     let value: Value = serde_json::from_str(&message)?;
     let raw_message = raw.unwrap_or_else(|| message.clone());
@@ -189,30 +176,21 @@ async fn events(
     tokio::task::spawn_blocking(move || -> std::result::Result<Json<Value>, ApiError> {
         let mut conn = open(&path).map_err(internal)?;
         let db = conn.transaction().map_err(internal)?;
-        let raw = if has_raw(&db).map_err(internal)? { "raw_message" } else { "NULL" };
-        let (visible, has_gaps) = archive_schema(&db).map_err(internal)?;
-        let (oldest, latest): (Option<i64>, Option<i64>) = db.query_row(&format!(
-            "SELECT (SELECT id FROM events WHERE {visible} ORDER BY id LIMIT 1),
-                    (SELECT id FROM events WHERE {visible} ORDER BY id DESC LIMIT 1)"
-        ), [], |r| Ok((r.get(0)?, r.get(1)?))).map_err(internal)?;
+        let (oldest, latest): (Option<i64>, Option<i64>) = db.query_row(
+            "SELECT (SELECT id FROM events WHERE revision_target IS NULL ORDER BY id LIMIT 1),
+                    (SELECT id FROM events WHERE revision_target IS NULL ORDER BY id DESC LIMIT 1)",
+            [], |r| Ok((r.get(0)?, r.get(1)?))).map_err(internal)?;
         let upper: i64 = db.query_row("SELECT COALESCE(MAX(id),0) FROM events", [], |r| r.get(0)).map_err(internal)?;
-        let gap = gap_marker(has_gaps);
-        let sql = if after.is_some() && visible != "1" {
+        let sql = if after.is_some() {
             // Each revision advances the scan at its own ID but delivers the current
             // projection at the original row ID, including rows leaving the filter.
             format!("SELECT e.id, COALESCE(t.id,e.id), COALESCE(t.received_at,e.received_at),
-                    COALESCE(t.message,e.message), CASE WHEN t.id IS NULL THEN e.raw_message ELSE t.raw_message END, t.id IS NOT NULL, {gap}
+                    COALESCE(t.message,e.message), CASE WHEN t.id IS NULL THEN e.raw_message ELSE t.raw_message END, t.id IS NOT NULL, {GAP_MARKER}
              FROM events e LEFT JOIN events t ON t.journal_id=e.journal_id AND t.position=e.revision_target
              WHERE e.id>?1 AND e.id<=?2 AND (e.revision_target IS NULL OR t.id IS NOT NULL) ORDER BY e.id")
         } else {
-            let (condition, order) = if after.is_some() {
-                ("id>?1 AND id<=?2", "ASC")
-            } else if before.is_some() {
-                ("id<?1 AND id<=?2", "DESC")
-            } else {
-                ("id<=?2", "DESC")
-            };
-            format!("SELECT id,id,received_at,message,{raw},0,{gap} FROM events e WHERE {visible} AND {condition} ORDER BY id {order}")
+            let condition = if before.is_some() { "id<?1 AND id<=?2" } else { "id<=?2" };
+            format!("SELECT id,id,received_at,message,raw_message,0,{GAP_MARKER} FROM events e WHERE revision_target IS NULL AND {condition} ORDER BY id DESC")
         };
         let mut statement = db.prepare(&sql).map_err(internal)?;
         let cursor = after.or(before);
@@ -237,7 +215,7 @@ async fn events(
         if after.is_none() { events.reverse(); }
         let mut page = json!({"events":events,"changes":changes,"next_id":next.to_string(),"oldest_id":oldest.map(|v| v.to_string()),"latest_id":latest.map(|v| v.to_string())});
         if let (Some((first, last)), Some(after)) = (gap_window, after) {
-            if next > after && has_gaps {
+            if next > after {
                 // Reconcile displayed retention gaps in the same snapshot as the new events.
                 let mut gaps = db.prepare("SELECT g.id FROM history_missing g JOIN events e ON e.id=g.id WHERE g.id BETWEEN ?1 AND ?2").map_err(internal)?;
                 let ids = gaps.query_map(params![first, last], |r| Ok(r.get::<_, i64>(0)?.to_string())).map_err(internal)?.collect::<rusqlite::Result<Vec<_>>>().map_err(internal)?;
@@ -254,16 +232,9 @@ async fn detail(
     let id = id(&value)?;
     tokio::task::spawn_blocking(move || {
         let db = open(&path).map_err(internal)?;
-        let raw = if has_raw(&db).map_err(internal)? {
-            "raw_message"
-        } else {
-            "NULL"
-        };
-        let (visible, has_gaps) = archive_schema(&db).map_err(internal)?;
-        let gap = gap_marker(has_gaps);
         let row: Option<(String, String, Option<String>, bool)> = db
             .query_row(
-                &format!("SELECT received_at,message,{raw},{gap} FROM events e WHERE id=?1 AND {visible}"),
+                &format!("SELECT received_at,message,raw_message,{GAP_MARKER} FROM events e WHERE id=?1 AND revision_target IS NULL"),
                 [id],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
